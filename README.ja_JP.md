@@ -1,7 +1,7 @@
 <div align="center">
   <div style="width:200px">
     <a href="https://vndb.org/c87839">
-      <img src="public/icon.png" alt="asumi">
+      <img src="src-tauri/icons/icon.ico" alt="asumi">
     </a>
   </div>
 
