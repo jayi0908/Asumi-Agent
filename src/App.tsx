@@ -1,50 +1,45 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { HashRouter, Routes, Route } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getSettings } from "./stores/settings";
 import "./App.css";
+import QuickLaunch from "./components/quick-launch/QuickLaunch";
+import Settings from "./pages/settings/Settings";
+import Home from "./pages/Home";
+
+const appWindow = getCurrentWebviewWindow();
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [isQuickLaunch, setIsQuickLaunch] = useState(false);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  useEffect(() => {
+    setIsQuickLaunch(appWindow.label === "quick-launch");
+  }, []);
+
+  // Sync the saved global shortcut to the Rust backend on startup
+  useEffect(() => {
+    if (!isQuickLaunch) {
+      const settings = getSettings();
+      if (settings.quickLaunchShortcut !== "Command+Shift+Space") {
+        invoke("set_shortcut", { shortcut: settings.quickLaunchShortcut });
+      }
+    }
+  }, [isQuickLaunch]);
+
+  // Quick launch window gets the minimal UI
+  if (isQuickLaunch) {
+    return <QuickLaunch />;
   }
 
+  // Main window gets the full app with routing
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <HashRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </HashRouter>
   );
 }
 

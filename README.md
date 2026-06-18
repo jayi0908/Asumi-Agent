@@ -21,15 +21,16 @@ A desktop AI Agent tool inspired by the character [錦 あすみ (Asumi Nishiki)
 
 The project is in early development, starting from macOS, with the following planned features:
 
-- [ ] **Menu Bar**: Display an Asumi-themed icon in the menu bar with contextual actions.
-- [ ] **Multi-Model Support**: Connect to various LLM providers (cloud API / local models) for flexible conversation and interactions.
+- [x] **Menu Bar**: Display an Asumi-themed icon in the menu bar with contextual actions.
+- [x] **Multi-Model Support**: Connect to various LLM providers (cloud API / local models) for flexible conversation and interactions.
 - [ ] **Desktop Pet**: Show Asumi's character on the desktop with text-based interaction.
 - [ ] **Voice Output**: TTS-powered voice synthesis in Asumi's character voice for immersive interaction.
 - [ ] **Transparent Companion**: Two modes — persistent (always on screen) and transparent (appears only under certain conditions).
 - [ ] **Screen Understanding**: Periodically capture screen content, analyze it via multimodal LLM, and let Asumi react to what you're doing.
 - [ ] **Quick Command Execution**: Define shortcuts or scripts for Asumi to execute, providing practical utility.
 - [ ] **Audio Playback**: Built-in audio clips related to Asumi for atmosphere.
-- [ ] **Quick Launch**: Summon a mini chat window via global hotkey for rapid interaction.
+- [x] **Quick Launch**: Summon a mini chat window via global hotkey for rapid interaction.
+- [ ] **Information Retrieval**: Let Asumi periodically fetch and summarize information from specified sources (websites/social media) to keep you updated.
 - [ ] **File Processing**: Drag-and-drop files for Asumi to process — write scripts or skills for automated file organization.
 - [ ] **Asumi Skill**: (TBD) Wrap existing skills with Asumi's tone and style for formatted output.
 
