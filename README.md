@@ -43,6 +43,8 @@ The project is in early development, starting from macOS, with the following pla
 
 ## Build from Source Code
 
+### macOS
+
 ```bash
 # Install Xcode CLI (if not installed)
 xcode-select --install
