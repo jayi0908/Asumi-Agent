@@ -41,6 +41,35 @@ The project is in early development, starting from macOS, with the following pla
 - **Frontend**: React + TypeScript + TailwindCSS
 - **Backend Language**: Rust
 
+## Build from Source Code
+
+```bash
+# Install Xcode CLI (if not installed)
+xcode-select --install
+
+# Install Homebrew (if not installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh # Press Enter to select default options during installation, then restart terminal or run source $HOME/.cargo/env
+
+# Install node and pnpm
+# node can be installed by Homebrew or nvm
+brew install node pnpm
+
+# Clone the repo
+git clone https://github.com/jayi0908/Asumi-Agent.git
+cd Asumi-Agent
+# Build front-end dependency
+pnpm install
+
+# Run in dev mode
+pnpm tauri dev
+
+# Build released version
+pnpm tauri build
+```
+
 ## Acknowledgements
 
 - [ハミダシクリエイティブ (Hamidashi Creative)](https://madosoft.net/hamidashi) — Inspiration for Asumi's character design and personality.

@@ -41,6 +41,37 @@
 - **前端**：React + TypeScript + TailwindCSS
 - **后端语言**：Rust
 
+## 从源码构建
+
+### macOS
+
+```bash
+# 安装 Xcode 命令行工具（如果尚未安装）
+xcode-select --install
+
+# 安装 Homebrew（如果尚未安装）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 安装 Rust 依赖
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh # 安装过程中 Enter 选择默认选项，安装后重启终端或运行 source $HOME/.cargo/env
+
+# 安装 node 和 pnpm
+# node 可以使用 Homebrew 安装，也可以使用 nvm 安装
+brew install node pnpm
+
+# 克隆仓库
+git clone https://github.com/jayi0908/Asumi-Agent.git
+cd Asumi-Agent
+# 安装前端依赖
+pnpm install
+
+# 开发模式运行
+pnpm tauri dev
+
+# 构建生产版本
+pnpm tauri build
+```
+
 ## 致谢
 
 - [ハミダシクリエイティブ](https://madosoft.net/hamidashi) — あすみ的形象和性格设计灵感来源。

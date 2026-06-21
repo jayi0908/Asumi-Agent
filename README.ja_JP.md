@@ -41,6 +41,34 @@
 - **フロントエンド**：React + TypeScript + TailwindCSS
 - **バックエンド言語**：Rust
 
+## ソースコードからのビルド
+
+```bash
+# Xcode CLI をインストール（未インストールの場合）
+xcode-select --install
+
+# Homebrew をインストール（未インストールの場合）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Rust をインストール
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh # インストール中は Enter でデフォルトオプションを選択、インストール後はターミナルを再起動するか source $HOME/.cargo/env を実行
+
+# node と pnpm をインストール
+brew install node pnpm
+
+# リポジトリをクローン
+git clone https://github.com/jayi0908/Asumi-Agent.git
+cd Asumi-Agent
+# 依存関係をインストール
+pnpm install
+
+# 開発サーバーを起動
+pnpm tauri dev
+
+# 製品版をビルドする
+pnpm tauri build
+```
+
 ## 謝辞
 
 - [ハミダシクリエイティブ](https://madosoft.net/hamidashi) — あすみのキャラクターデザインと性格のインスピレーション。
