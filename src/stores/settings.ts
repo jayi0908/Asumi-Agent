@@ -41,6 +41,10 @@ export interface AppSettings {
   providers: ModelProvider[];
   assistants: AssistantConfig[];
   agents: AgentConfig[];
+  // Asumi Skill
+  enableAsumiSkill: boolean;
+  skillFormatterAssistantId: string | null;
+  skillCharacterConfigId: string;
 }
 
 const STORAGE_KEY = "asumi-settings";
@@ -66,6 +70,9 @@ const defaults: AppSettings = {
   ],
   assistants: [],
   agents: [],
+  enableAsumiSkill: false,
+  skillFormatterAssistantId: null,
+  skillCharacterConfigId: "default",
 };
 
 function migrateFromV1(): AppSettings {
@@ -82,10 +89,8 @@ function migrateFromV1(): AppSettings {
     // Migrate v1 flat format → v2 structured
     const providerId = "deepseek";
     const settings: AppSettings = {
+      ...defaults,
       quickLaunchShortcut: old.quickLaunchShortcut || defaults.quickLaunchShortcut,
-      quickLaunchAssistantId: null,
-      quickLaunchEnabled: true,
-      quickLaunchReadClipboard: false,
       providers: [
         {
           id: providerId,
@@ -149,11 +154,20 @@ export function updateProvider(id: string, patch: Partial<ModelProvider>) {
 
 export function removeProvider(id: string) {
   const settings = getSettings();
+  // Collect IDs of assistants that will be removed
+  const removedAssistantIds = new Set(
+    settings.assistants.filter((a) => a.providerId === id).map((a) => a.id),
+  );
   saveSettings({
     providers: settings.providers.filter((p) => p.id !== id),
     // Also clean up assistants/agents referencing this provider
     assistants: settings.assistants.filter((a) => a.providerId !== id),
     agents: settings.agents.filter((a) => a.providerId !== id),
+    // Clear formatter assistant if it was removed
+    skillFormatterAssistantId:
+      settings.skillFormatterAssistantId && removedAssistantIds.has(settings.skillFormatterAssistantId)
+        ? null
+        : settings.skillFormatterAssistantId,
   });
 }
 
@@ -183,6 +197,9 @@ export function removeAssistant(id: string) {
     // Clear quickLaunchAssistantId if it pointed to this assistant
     quickLaunchAssistantId:
       settings.quickLaunchAssistantId === id ? null : settings.quickLaunchAssistantId,
+    // Clear skillFormatterAssistantId if it pointed to this assistant
+    skillFormatterAssistantId:
+      settings.skillFormatterAssistantId === id ? null : settings.skillFormatterAssistantId,
   });
 }
 

@@ -1,8 +1,10 @@
 use std::str::FromStr;
 use std::sync::Mutex;
 
+use futures_util::StreamExt;
 use tauri::{
     image::Image,
+    ipc::Channel,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
     LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -235,6 +237,280 @@ async fn submit_quick_message(
     call_chat_api(&api_key, &base_url, &model, &messages).await
 }
 
+/// Build a formatter system prompt from character config JSON fields.
+fn build_formatter_prompt(config: &serde_json::Value) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    // Persona identity
+    if let Some(identity) = config["persona"]["identity"].as_str() {
+        parts.push(identity.to_string());
+    }
+
+    // Personality traits
+    if let Some(traits) = config["persona"]["personality_traits"].as_array() {
+        let trait_str: Vec<&str> = traits.iter().filter_map(|t| t.as_str()).collect();
+        if !trait_str.is_empty() {
+            parts.push(format!("性格特征：{}。", trait_str.join("、")));
+        }
+    }
+
+    // Likes/Dislikes
+    if let Some(likes) = config["persona"]["likes"].as_array() {
+        let likes_str: Vec<&str> = likes.iter().filter_map(|l| l.as_str()).collect();
+        if !likes_str.is_empty() {
+            parts.push(format!("喜欢：{}。", likes_str.join("、")));
+        }
+    }
+
+    // Voice / tone
+    if let Some(tone) = config["voice"]["tone"].as_str() {
+        parts.push(format!("说话语气：{}", tone));
+    }
+
+    // Address terms
+    if let Some(addr) = config["voice"]["address_user_as"].as_str() {
+        parts.push(format!("称呼用户为「{}」。", addr));
+    }
+
+    // Speech patterns
+    if let Some(patterns) = config["voice"]["speech_patterns"].as_array() {
+        let pattern_str: Vec<&str> = patterns.iter().filter_map(|p| p.as_str()).collect();
+        if !pattern_str.is_empty() {
+            parts.push("说话风格规则：".to_string());
+            for p in pattern_str {
+                parts.push(format!("- {}", p));
+            }
+        }
+    }
+
+    // Greeting
+    if let Some(greeting) = config["voice"]["greeting"].as_str() {
+        parts.push(format!("打招呼的方式：{}", greeting));
+    }
+
+    // Formatting rules - prohibited
+    if let Some(rules) = config["formatting_rules"].as_object() {
+        if let Some(prohibited) = rules.get("prohibited").and_then(|v| v.as_array()) {
+            let prohibited_str: Vec<&str> = prohibited.iter().filter_map(|p| p.as_str()).collect();
+            if !prohibited_str.is_empty() {
+                parts.push(format!("严禁使用以下格式：{}。", prohibited_str.join("、")));
+            }
+        }
+        if let Some(preferred) = rules.get("preferred").and_then(|v| v.as_str()) {
+            parts.push(format!("偏好的表达风格：{}", preferred));
+        }
+        if let Some(code_handling) = rules.get("code_handling").and_then(|v| v.as_str()) {
+            parts.push(format!("代码处理方式：{}", code_handling));
+        }
+    }
+
+    // Response guidelines
+    if let Some(guidelines) = config["response_guidelines"].as_array() {
+        parts.push("\n回复时需要遵守以下准则：".to_string());
+        for g in guidelines {
+            if let Some(text) = g.as_str() {
+                parts.push(format!("- {}", text));
+            }
+        }
+    }
+
+    // Few-shot examples
+    if let Some(examples) = config["examples"].as_array() {
+        if !examples.is_empty() {
+            parts.push("\n以下是将技术性回复改写为角色语气风格的示例：".to_string());
+            for ex in examples.iter().take(3) {
+                let input = ex["input"].as_str().unwrap_or("");
+                let output = ex["output"].as_str().unwrap_or("");
+                parts.push(format!("输入：{}\n输出：{}", input, output));
+            }
+        }
+    }
+
+    parts.join("\n\n")
+}
+
+#[tauri::command]
+async fn format_with_character(
+    raw_text: String,
+    character_config: String,
+    api_key: String,
+    base_url: String,
+    model: String,
+) -> Result<String, String> {
+    let config: serde_json::Value = serde_json::from_str(&character_config)
+        .map_err(|e| format!("Invalid character config JSON: {}", e))?;
+
+    let system_prompt = build_formatter_prompt(&config);
+
+    let messages = vec![
+        serde_json::json!({
+            "role": "system",
+            "content": system_prompt,
+        }),
+        serde_json::json!({
+            "role": "user",
+            "content": format!("请将以下文本改写成符合角色设定的语气和风格：\n\n{}", raw_text),
+        }),
+    ];
+
+    call_chat_api(&api_key, &base_url, &model, &messages).await
+}
+
+/// Build a style guide from character config that can be merged into any system prompt.
+fn build_style_guide(config: &serde_json::Value) -> String {
+    let mut parts: Vec<String> = vec!["===== 回复风格指南 =====".to_string()];
+
+    // Voice / tone
+    if let Some(tone) = config["voice"]["tone"].as_str() {
+        parts.push(format!("- 语气：{}", tone));
+    }
+
+    // Address terms
+    if let Some(terms) = config["voice"]["address_user_as"].as_str() {
+        parts.push(format!("- 称呼用户为「{}」", terms));
+    }
+
+    // Speech patterns
+    if let Some(patterns) = config["voice"]["speech_patterns"].as_array() {
+        let lines: Vec<&str> = patterns.iter().filter_map(|p| p.as_str()).collect();
+        for line in lines {
+            parts.push(format!("- {}", line));
+        }
+    }
+
+    // Language rule
+    if let Some(lang_rule) = config["language"]["rule"].as_str() {
+        parts.push(format!("- 语言：{}", lang_rule));
+    }
+
+    // Style guide - general
+    if let Some(general) = config["style_guide"]["general"].as_array() {
+        for g in general {
+            if let Some(text) = g.as_str() {
+                parts.push(format!("- {}", text));
+            }
+        }
+    }
+
+    // What to preserve
+    if let Some(preserve) = config["style_guide"]["preserve"].as_array() {
+        parts.push("\n===== 必须保留的内容（切勿修改）=====".to_string());
+        for p in preserve {
+            if let Some(text) = p.as_str() {
+                parts.push(format!("- {}", text));
+            }
+        }
+    }
+
+    // Prohibited formats
+    if let Some(prohibited) = config["style_guide"]["prohibited_formats"].as_array() {
+        let lines: Vec<&str> = prohibited.iter().filter_map(|p| p.as_str()).collect();
+        if !lines.is_empty() {
+            parts.push(format!("\n不要使用这些格式：{}", lines.join("、")));
+        }
+    }
+
+    parts.join("\n")
+}
+
+#[tauri::command]
+async fn stream_submit_message(
+    message: String,
+    api_key: String,
+    base_url: String,
+    model: String,
+    system_prompt: String,
+    on_chunk: Channel<String>,
+    character_config: Option<String>,
+) -> Result<String, String> {
+    let mut messages = vec![];
+
+    let final_system_prompt = if let Some(ref config_json) = character_config {
+        if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_json) {
+            let style_guide = build_style_guide(&config);
+            if system_prompt.is_empty() {
+                style_guide
+            } else {
+                format!("{}\n\n{}", system_prompt, style_guide)
+            }
+        } else {
+            system_prompt
+        }
+    } else {
+        system_prompt
+    };
+
+    if !final_system_prompt.is_empty() {
+        messages.push(serde_json::json!({
+            "role": "system",
+            "content": final_system_prompt,
+        }));
+    }
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": message,
+    }));
+
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let request_body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": true,
+    });
+
+    let endpoint = format!(
+        "{}/v1/chat/completions",
+        base_url.trim_end_matches('/')
+    );
+
+    let response = client
+        .post(&endpoint)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("API error ({}): {}", status, error_text));
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut full_text = String::new();
+    let mut buffer = String::new();
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("Stream error: {}", e))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        while let Some(newline_pos) = buffer.find('\n') {
+            let line = buffer[..newline_pos].to_string();
+            buffer = buffer[newline_pos + 1..].to_string();
+
+            if let Some(data) = line.strip_prefix("data: ") {
+                let trimmed = data.trim();
+                if trimmed == "[DONE]" {
+                    return Ok(full_text);
+                }
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
+                        full_text.push_str(content);
+                        let _ = on_chunk.send(content.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(full_text)
+}
+
 #[tauri::command]
 async fn test_api_connection(
     api_key: String,
@@ -392,7 +668,9 @@ pub fn run() {
             test_api_connection,
             fetch_models,
             read_clipboard,
-            set_quick_launch_enabled
+            set_quick_launch_enabled,
+            format_with_character,
+            stream_submit_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

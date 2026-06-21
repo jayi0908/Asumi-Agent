@@ -6,6 +6,7 @@ import SnowflakeIcon from "../../components/SnowflakeIcon";
 import ModelsSection from "../../components/settings/ModelsSection";
 import AssistantsSection from "../../components/settings/AssistantsSection";
 import AgentsSection from "../../components/settings/AgentsSection";
+import AsumiSkillSection from "../../components/settings/AsumiSkillSection";
 import CustomSelect from "../../components/settings/CustomSelect";
 
 type ShortcutKey = "quickLaunchShortcut";
@@ -62,7 +63,7 @@ function bindingToAccelerator(binding: string[]): string {
     .join("+");
 }
 
-const SIDEBAR_SECTIONS = ["Models", "Assistants", "Agents", "Quick Launch", "Shortcuts", "About"] as const;
+const SIDEBAR_SECTIONS = ["Models", "Assistants", "Agents", "Asumi Skill", "Quick Launch", "Shortcuts", "About"] as const;
 type Section = (typeof SIDEBAR_SECTIONS)[number];
 
 function SectionLink({
@@ -199,6 +200,9 @@ export default function Settings() {
 
           {/* Agents Section — full-height two-panel */}
           {activeSection === "Agents" && <AgentsSection key={activeSection} />}
+
+          {/* Asumi Skill Section */}
+          {activeSection === "Asumi Skill" && <AsumiSkillSection key={activeSection} />}
 
           {/* Quick Launch Section */}
           {activeSection === "Quick Launch" && (

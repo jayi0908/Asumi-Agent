@@ -32,7 +32,8 @@ The project is in early development, starting from macOS, with the following pla
 - [x] **Quick Launch**: Summon a mini chat window via global hotkey for rapid interaction.
 - [ ] **Information Retrieval**: Let Asumi periodically fetch and summarize information from specified sources (websites/social media) to keep you updated.
 - [ ] **File Processing**: Drag-and-drop files for Asumi to process — write scripts or skills for automated file organization.
-- [ ] **Asumi Skill**: (TBD) Wrap existing skills with Asumi's tone and style for formatted output.
+- [x] **Asumi Skill**: Allow users to specify Asumi's tone and style for output formatting.
+- [ ] **Third Party Skill**: Allow users to integrate third-party skills to extend Asumi's capabilities.
 
 ## Tech Stack
 

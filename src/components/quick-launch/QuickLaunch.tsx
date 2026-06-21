@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalSize } from "@tauri-apps/api/dpi";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { getSettings, getAssistant, getAssistantApiConfig } from "../../stores/settings";
 import SnowflakeIcon from "../SnowflakeIcon";
+
+// Loaded once per mount — holds the parsed character config for the formatter.
+let characterConfigCache: object | null = null;
+let characterConfigLoaded = false;
 
 const appWindow = getCurrentWebviewWindow();
 const QUICK_LAUNCH_WIDTH = 420;
@@ -103,6 +107,20 @@ export default function QuickLaunch() {
     };
   }, [hasMessages, messages]);
 
+  // Preload character config on mount
+  useEffect(() => {
+    if (characterConfigLoaded) return;
+    characterConfigLoaded = true;
+    fetch("/character-configs/default.json")
+      .then((r) => r.json())
+      .then((cfg) => {
+        characterConfigCache = cfg;
+      })
+      .catch(() => {
+        characterConfigCache = null;
+      });
+  }, []);
+
   const handleSubmit = useCallback(() => {
     if (!input.trim()) return;
     const userMsg = input.trim();
@@ -120,30 +138,37 @@ export default function QuickLaunch() {
       return;
     }
 
+    const settings = getSettings();
     const pendingId = Date.now().toString();
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: userMsg },
-      { role: "assistant", content: "...", id: pendingId },
-    ]);
 
-    invoke<string>("submit_quick_message", {
-      message: userMsg,
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
-      model: config.model,
-      systemPrompt: assistant?.systemPrompt ?? "",
-    })
-      .then((res) => {
+    // --- Asumi Skill: single merged streaming call ---
+    if (settings.enableAsumiSkill && characterConfigCache) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "", id: pendingId },
+      ]);
+
+      const channel = new Channel<string>();
+      channel.onmessage = (token: string) => {
         setMessages((prev) =>
           prev.map((msg) =>
             "id" in msg && msg.id === pendingId
-              ? { role: "assistant" as const, content: res }
+              ? { role: "assistant" as const, content: msg.content + token, id: pendingId }
               : msg,
           ),
         );
-      })
-      .catch((err) => {
+      };
+
+      invoke<string>("stream_submit_message", {
+        message: userMsg,
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        systemPrompt: assistant?.systemPrompt ?? "",
+        onChunk: channel,
+        characterConfig: JSON.stringify(characterConfigCache),
+      }).catch((err) => {
         setMessages((prev) =>
           prev.map((msg) =>
             "id" in msg && msg.id === pendingId
@@ -152,6 +177,43 @@ export default function QuickLaunch() {
           ),
         );
       });
+      return;
+    }
+
+    // --- Normal flow (streaming, no character style) ---
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userMsg },
+      { role: "assistant", content: "", id: pendingId },
+    ]);
+
+    const channel = new Channel<string>();
+    channel.onmessage = (token: string) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          "id" in msg && msg.id === pendingId
+            ? { role: "assistant" as const, content: msg.content + token, id: pendingId }
+            : msg,
+        ),
+      );
+    };
+
+    invoke<string>("stream_submit_message", {
+      message: userMsg,
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      systemPrompt: assistant?.systemPrompt ?? "",
+      onChunk: channel,
+    }).catch((err) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          "id" in msg && msg.id === pendingId
+            ? { role: "assistant" as const, content: String(err) }
+            : msg,
+        ),
+      );
+    });
   }, [input]);
 
   const handleKeyDown = useCallback(

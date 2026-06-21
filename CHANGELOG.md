@@ -31,3 +31,21 @@
 - System-wide global shortcut registration
 - Tray icon with menu
 - Settings migration from v1 flat format to v2 structured format
+
+### 2026.6.21
+
+#### Asumi Skill
+- Character response styling via single merged streaming API call — style guide injected into system prompt, no separate formatter step
+- Character config JSON file at `public/character-configs/default.json` — user-editable persona, voice, language, style guide, and formatting rules
+- Enable/disable toggle and character config selector in settings
+- Code blocks and math formulas preserved untouched when styling is active
+
+#### Streaming
+- All LLM calls now use SSE streaming (`stream: true`) for incremental token output
+- Tauri `Channel`-based token delivery from Rust backend to React frontend
+- Both normal and skill-styled responses stream in real-time
+
+#### Backend
+- `stream_submit_message` Tauri command with optional character config merging
+- `build_style_guide()` — dynamically builds a style guide prompt from character config JSON
+- `stream` feature enabled on reqwest; `futures-util` added for async stream iteration
