@@ -1,0 +1,9 @@
+{
+  "name": "electron-updater",
+  "version": "6.7.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  }
+}

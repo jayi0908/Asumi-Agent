@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="initial-scale=1, width=device-width" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src blob: *; script-src 'self' 'unsafe-eval' 'unsafe-inline' *; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' *; font-src 'self' data: *; img-src 'self' data: file: * blob:; media-src 'self' file:; frame-src * file:" />
+    <title>Cherry Studio</title>
+    <style>
+      html, body { margin: 0; }
+      #spinner { position: fixed; width: 100vw; height: 100vh; flex-direction: row; justify-content: center; align-items: center; display: flex; }
+      #spinner img { width: 100px; border-radius: 50px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="spinner">
+      <img src="/assets/images/logo.png" />
+    </div>
+    <script>console.time('init')</script>
+    <script>
+      window.__CHERRY_HTTP_PORT = 38887
+      // Try to auto-detect from backend port file
+      fetch('/assets/cherry-backend-port.json?t=' + Date.now())
+        .then(r => r.json())
+        .then(p => { if (p.httpPort) window.__CHERRY_HTTP_PORT = p.httpPort })
+        .catch(() => {})
+    </script>
+    <script>
+      // WKWebView stalls module scripts that load mid-burst (parse-time tags and
+      // early dynamic imports die silently, and each stalled URL stays poisoned).
+      // Retry with a fresh query URL per attempt so a post-burst import mounts
+      // the app; stop as soon as #root has children.
+      (async () => {
+        for (let i = 0; i < 8; i++) {
+          await new Promise((r) => setTimeout(r, 300 + i * 1200))
+          try {
+            await import('/windows/main/entryPoint.tsx?v=' + i)
+            if (document.getElementById('root')?.childNodes.length) break
+          } catch (e) {
+            try { location.hash = 'E=' + encodeURIComponent(String(e)) } catch {}
+          }
+        }
+      })()
+    </script>
+  </body>
+</html>

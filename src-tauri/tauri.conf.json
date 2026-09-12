@@ -1,23 +1,24 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Asumi Agent",
-  "version": "0.1.0",
-  "identifier": "com.jayi0908.AsumiAgent",
+  "productName": "Cherry Studio",
+  "version": "2.0.0",
+  "identifier": "com.cherry.studio.tauri",
   "build": {
-    "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeDevCommand": "pnpm dev:renderer",
+    "devUrl": "http://127.0.0.1:1420/windows/main/index.html",
+    "beforeBuildCommand": "pnpm build:renderer",
     "frontendDist": "../dist"
   },
   "app": {
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Asumi Agent",
-        "width": 800,
-        "height": 600,
+        "label": "main",
+        "title": "Cherry Studio",
+        "width": 1200,
+        "height": 800,
         "center": true,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {

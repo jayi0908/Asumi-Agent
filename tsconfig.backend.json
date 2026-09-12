@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@application": ["./src/main/core/application"],
+      "@application/*": ["./src/main/core/application/*"],
+      "@data/*": ["./src/main/data/*"],
+      "@logger": ["./src/main/core/logger/LoggerService"],
+      "@main/*": ["./src/main/*"],
+      "@shared/*": ["./src/shared/*"],
+      "@types": ["./src/renderer/types/index.ts"],
+      "@mcp-trace/*": ["./packages/mcp-trace/*"],
+      "@cherrystudio/ai-core/built-in/plugins": ["./packages/aiCore/src/core/plugins/built-in/index.ts"],
+      "@cherrystudio/ai-core/provider": ["./packages/aiCore/src/core/providers/index.ts"],
+      "@cherrystudio/ai-core": ["./packages/aiCore/src/index.ts"],
+      "@cherrystudio/ai-core/*": ["./packages/aiCore/src/*"],
+      "@cherrystudio/ai-sdk-provider": ["./packages/ai-sdk-provider/src/index.ts"],
+      "@cherrystudio/provider-registry": ["./packages/provider-registry/src/index.ts"],
+      "@cherrystudio/provider-registry/node": ["./packages/provider-registry/src/registry-loader.ts"],
+      "@vectorstores/libsql": ["./packages/vectorstores/libsql/src/index.ts"]
+    }
+  },
+  "include": ["src/backend/**/*", "src/main/**/*", "src/shared/**/*", "packages/electron-shim/src/**/*"]
+}

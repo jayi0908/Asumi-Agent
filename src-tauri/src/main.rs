@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    asumi_agent_lib::run()
+    cherry_studio_tauri_lib::run()
 }

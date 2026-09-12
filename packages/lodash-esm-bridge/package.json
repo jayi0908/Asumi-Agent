@@ -1,0 +1,12 @@
+{
+  "name": "lodash",
+  "version": "4.17.21",
+  "description": "ESM bridge from lodash-es (Tauri Node backend)",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./*": "./lib/*.js",
+    "./package.json": "./package.json"
+  }
+}
