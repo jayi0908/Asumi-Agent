@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+src-tauri/target
+.tsbuildinfo
+.pnpm-store
+build/
 
 # Editor directories and files
 .vscode/*
@@ -24,4 +28,8 @@ dist-ssr
 *.sw?
 
 .claude/
-Makefile
+
+# Cherry symlink targets within src/main (in-repo siblings)
+src/main/migrations
+src/main/packages
+src/main/resources
