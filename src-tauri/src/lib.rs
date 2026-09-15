@@ -1197,6 +1197,46 @@ fn backend_status(bridge: State<'_, Arc<BackendBridge>>) -> Result<Value, String
     Ok(json!({ "port": port, "connected": connected }))
 }
 
+/// Voice used for a given script, overridable through the environment.
+///
+/// `say` reads with the system default voice, which is usually single-language
+/// — English text under a Chinese default (or vice versa) is skipped or
+/// mangled. Asumi picks a voice from the text's script instead.
+fn tts_voice_for(text: &str) -> String {
+    let has_kana = text
+        .chars()
+        .any(|c| matches!(c, '\u{3040}'..='\u{30ff}'));
+    let has_han = text
+        .chars()
+        .any(|c| matches!(c, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}'));
+
+    let (env_key, default) = if has_kana {
+        ("ASUMI_TTS_VOICE_JA", "Kyoko")
+    } else if has_han {
+        ("ASUMI_TTS_VOICE_ZH", "Tingting")
+    } else {
+        ("ASUMI_TTS_VOICE_EN", "Samantha")
+    };
+
+    std::env::var("ASUMI_TTS_VOICE")
+        .or_else(|_| std::env::var(env_key))
+        .unwrap_or_else(|_| default.to_string())
+}
+
+/// The set of voice names this machine has, cached for the process lifetime.
+fn installed_voices() -> &'static std::collections::HashSet<String> {
+    static VOICES: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    VOICES.get_or_init(|| {
+        match Command::new("/usr/bin/say").arg("-v").arg("?").output() {
+            Ok(output) => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| line.split_whitespace().next().map(str::to_string))
+                .collect(),
+            Err(_) => std::collections::HashSet::new(),
+        }
+    })
+}
+
 /// Speak `text` through the OS text-to-speech engine.
 ///
 /// macOS ships `say`; other platforms fall back to logging until a native
@@ -1204,9 +1244,13 @@ fn backend_status(bridge: State<'_, Arc<BackendBridge>>) -> Result<Value, String
 fn asumi_speak(text: &str) {
     #[cfg(target_os = "macos")]
     {
-        // Detached: don't block the desktop bridge reader on synthesis.
-        match Command::new("/usr/bin/say").arg(text).spawn() {
-            Ok(child) => eprintln!("[tauri] tts speaking (pid {})", child.id()),
+        let voice = tts_voice_for(text);
+        let mut command = Command::new("/usr/bin/say");
+        if installed_voices().contains(&voice) {
+            command.arg("-v").arg(&voice);
+        }
+        match command.arg(text).spawn() {
+            Ok(child) => eprintln!("[tauri] tts speaking (pid {}, voice {voice})", child.id()),
             Err(error) => eprintln!("[tauri] tts failed: {error}"),
         }
     }
@@ -1224,6 +1268,11 @@ fn handle_asumi_desktop_message(app: &AppHandle, msg: &Value) {
         "speak" => {
             let text = msg.get("text").and_then(|v| v.as_str()).unwrap_or("");
             if !text.is_empty() {
+                let literal = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
+                pet_eval(
+                    app,
+                    &format!("window.__asumiSay && window.__asumiSay({literal})"),
+                );
                 let _ = app
                     .notification()
                     .builder()
@@ -1240,8 +1289,11 @@ fn handle_asumi_desktop_message(app: &AppHandle, msg: &Value) {
         }
         "pet-state" => {
             let state = msg.get("state").and_then(|v| v.as_str()).unwrap_or("neutral");
-            println!("[asumi-desktop] pet-state -> {state}");
-            // Phase 3b: forward to the pet window once it exists.
+            let literal = serde_json::to_string(state).unwrap_or_else(|_| "\"neutral\"".to_string());
+            pet_eval(
+                app,
+                &format!("window.__asumiSetState && window.__asumiSetState({literal})"),
+            );
             let _ = app.emit("asumi://pet-state", json!({ "state": state }));
         }
         "audio" => {
@@ -1295,6 +1347,58 @@ fn spawn_asumi_desktop_client(app: &AppHandle) {
     });
 }
 
+const PET_LABEL: &str = "pet";
+
+/// Create the transparent, click-through pet window if it does not exist yet.
+fn ensure_pet_window(app: &AppHandle) {
+    if app.get_webview_window(PET_LABEL).is_some() {
+        return;
+    }
+
+    let page = resolve_repo_root().join("src-tauri").join("pet").join("index.html");
+    let Ok(url) = tauri::Url::from_file_path(&page) else {
+        eprintln!("[tauri] pet page path invalid: {}", page.display());
+        return;
+    };
+
+    match WebviewWindowBuilder::new(app, PET_LABEL, WebviewUrl::External(url))
+        .title("Asumi")
+        .inner_size(220.0, 320.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .build()
+    {
+        Ok(window) => {
+            // Click-through: the pet is decoration, not a hit target.
+            let _ = window.set_ignore_cursor_events(true);
+
+            // Park it near the bottom-right of the primary monitor.
+            if let Ok(Some(monitor)) = app.primary_monitor() {
+                let scale = monitor.scale_factor();
+                let screen = monitor.size();
+                let margin = 24.0 * scale;
+                let x = screen.width as f64 - 220.0 * scale - margin;
+                let y = screen.height as f64 - 320.0 * scale - margin;
+                let _ = window.set_position(PhysicalPosition::new(x, y));
+            }
+
+            eprintln!("[tauri] pet window created");
+        }
+        Err(error) => eprintln!("[tauri] pet window failed: {error}"),
+    }
+}
+
+/// Call a JS hook on the pet page, ignoring when the window is absent.
+fn pet_eval(app: &AppHandle, script: &str) {
+    if let Some(pet) = app.get_webview_window(PET_LABEL) {
+        let _ = pet.eval(script);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let bridge = Arc::new(BackendBridge::new());
@@ -1339,6 +1443,9 @@ pub fn run() {
 
             // Connect to the Asumi desktop bridge hosted by the DSH plugin.
             spawn_asumi_desktop_client(app.handle());
+
+            // Spawn the transparent, always-on-top pet window.
+            ensure_pet_window(app.handle());
 
             // Watch for the DSH URL file (written by beforeDevCommand: spawn-dsh.mjs)
             // and navigate the main window once DSH is ready.

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Asumi</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: -apple-system, "PingFang SC", system-ui, sans-serif;
+        /* The window is click-through; this is purely visual. */
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: center;
+      }
+
+      .bubble {
+        position: absolute;
+        top: 4px;
+        left: 50%;
+        transform: translateX(-50%) scale(0.9);
+        max-width: 92%;
+        padding: 7px 11px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.96);
+        color: #2b2b3a;
+        font-size: 12px;
+        line-height: 1.45;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+        opacity: 0;
+        transition: opacity 0.22s ease, transform 0.22s ease;
+        pointer-events: none;
+        word-break: break-word;
+      }
+
+      .bubble.show {
+        opacity: 1;
+        transform: translateX(-50%) scale(1);
+      }
+
+      .bubble::after {
+        content: "";
+        position: absolute;
+        bottom: -6px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-left: 6px solid transparent;
+        border-right: 6px solid transparent;
+        border-top: 6px solid rgba(255, 255, 255, 0.96);
+      }
+
+      .asumi {
+        width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        object-position: bottom;
+        animation: float 3.4s ease-in-out infinite;
+        filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.28));
+        transition: transform 0.25s ease;
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-5px); }
+      }
+
+      /* Emotion states nudge the pose; art swap can replace these later. */
+      body[data-state="happy"] .asumi { transform: translateY(-3px) scale(1.02); }
+      body[data-state="excited"] .asumi { animation-duration: 1.6s; }
+      body[data-state="shy"] .asumi { transform: translateY(2px) scale(0.99); filter: drop-shadow(0 6px 14px rgba(255, 150, 180, 0.35)); }
+      body[data-state="thinking"] .asumi { animation-duration: 5s; }
+    </style>
+  </head>
+  <body data-state="neutral">
+    <div class="stage">
+      <div class="bubble" id="bubble"></div>
+      <img class="asumi" id="asumi" src="./asumi.png" alt="Asumi" />
+    </div>
+    <script>
+      const bubble = document.getElementById('bubble')
+      let hideTimer = null
+
+      // Called from the Tauri shell when the agent changes the pet mood.
+      window.__asumiSetState = (state) => {
+        document.body.dataset.state = state || 'neutral'
+      }
+
+      // Called from the Tauri shell when Asumi speaks.
+      window.__asumiSay = (text) => {
+        if (!text) return
+        bubble.textContent = text
+        bubble.classList.add('show')
+        if (hideTimer) clearTimeout(hideTimer)
+        hideTimer = setTimeout(() => bubble.classList.remove('show'), 6000)
+      }
+    </script>
+  </body>
+</html>
