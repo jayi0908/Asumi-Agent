@@ -12,7 +12,7 @@
   },
   "packageManager": "pnpm@10.27.0",
   "scripts": {
-    "postinstall": "node scripts/fix-sharp-binary.mjs",
+    "postinstall": "node scripts/fix-sharp-binary.mjs && node scripts/link-dsh-packages.mjs",
     "sync:cherry": "bash scripts/sync-from-cherry.sh",
     "gen:ipc-map": "node scripts/gen-ipc-map.mjs",
     "dev:renderer": "vite",

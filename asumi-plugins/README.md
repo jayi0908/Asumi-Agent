@@ -19,6 +19,7 @@ asumi-plugins/
 | 插件 | 作用 | 状态 |
 |---|---|---|
 | `asumi-persona` | 錦 あすみ 的人设（system prompt 段）+ `asumi_name` 变量 | ✅ |
+| `asumi-desktop` | 桌面桥：`ctx.asumiDesktop`（speak / pet-state / audio / notify / capture-screen）+ `asumi_speak` 工具；监听 `127.0.0.1:3099` 供 Tauri 连接 | ✅ 桥接已通（Tauri 客户端 Phase 3） |
 
 ## 安装到 profile
 
@@ -43,10 +44,10 @@ pnpm dsh --profile asumi --no-open 2>&1 | rg "asumi-"
 ## 编写新插件的要点
 
 - 插件是 `apply(ctx)` 函数；`inject` 声明依赖的服务，DSH 保证依赖就绪后才调用。
-- 通过 `ctx` 的注册（`ctx.effect` / `ctx.on` / `ctx.systemPrompt.section` …）在卸载时自动回滚，
-  不要手写清理逻辑。
-- **不要从 `@deepseek-ai/cordis` 导入运行时值**（当前未 hoist）；函数式插件足够。
-  类型可用 `import type`。
-- 需要共享数据时优先用 prompt 变量（`ctx.systemPrompt.variable`）或自定义服务键。
+- 通过 `ctx` 的注册（`ctx.effect` / `ctx.on` / `ctx.tools.register` / `ctx.systemPrompt.section`…）
+  在卸载时自动回滚，不要手写清理逻辑。
+- 可导入宿主包：`@deepseek-ai/cordis`（`Service`）、`@deepseek-ai/dsh-tools`（`defineTool`）等。
+  这些包由 `scripts/link-dsh-packages.mjs`（postinstall）软链到 `asumi-plugins/node_modules`。
+- 需要跨插件共享数据时，优先用服务键（`ctx.<name>`）或 prompt 变量（`ctx.systemPrompt.variable`）。
 ```
 

@@ -1,0 +1,14 @@
+{
+  "name": "asumi-plugin-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Desktop bridge between the Asumi agent and the Tauri shell (pet state, TTS, audio, screen)",
+  "main": "index.js",
+  "files": ["index.js", "cordis.patch.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

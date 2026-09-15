@@ -37,3 +37,6 @@ src/main/resources
 # Runtime artifacts written by the backend / DSH wrapper on each start
 src/renderer/assets/cherry-backend-port.json
 dist/dsh-url.json
+
+# Host-package links generated for the in-repo Asumi plugins (postinstall)
+asumi-plugins/node_modules
