@@ -1,15 +1,9 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Cherry Studio windows (expand instead of inventing product limits)",
+  "description": "Default capabilities for Asumi Agent (DSH-powered)",
   "windows": [
-    "main",
-    "settings",
-    "quickAssistant",
-    "subWindow",
-    "selectionToolbar",
-    "selectionAction",
-    "migrationV2"
+    "main"
   ],
   "permissions": [
     "core:default",

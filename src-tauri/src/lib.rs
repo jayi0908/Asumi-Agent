@@ -1238,6 +1238,36 @@ pub fn run() {
             install_sigterm_exit(app_handle.clone(), Arc::clone(&bridge_for_setup));
             let bridge = bridge_for_setup;
             std::thread::spawn(move || spawn_backend_loop(&app_handle, &bridge));
+
+            // Watch for the DSH URL file (written by beforeDevCommand: spawn-dsh.mjs)
+            // and navigate the main window once DSH is ready.
+            let app_handle_dsh = app.handle().clone();
+            let url_file = resolve_repo_root().join("dist/dsh-url.json");
+            std::thread::spawn(move || {
+                let start = std::time::Instant::now();
+                loop {
+                    if let Ok(content) = std::fs::read_to_string(&url_file) {
+                        if let Ok(info) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Some(url) = info.get("url").and_then(|v| v.as_str()) {
+                                eprintln!("[tauri] DSH ready at {url}");
+                                // Give the webview a moment to settle on about:blank
+                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                if let Some(win) = app_handle_dsh.get_webview_window(labels::MAIN) {
+                                    let _ = win.eval(&format!("window.location.href = '{url}'"));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // Timeout after 3 minutes
+                    if start.elapsed().as_secs() > 180 {
+                        eprintln!("[tauri] DSH URL not found within 3 minutes; giving up");
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
