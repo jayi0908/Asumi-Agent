@@ -1197,6 +1197,104 @@ fn backend_status(bridge: State<'_, Arc<BackendBridge>>) -> Result<Value, String
     Ok(json!({ "port": port, "connected": connected }))
 }
 
+/// Speak `text` through the OS text-to-speech engine.
+///
+/// macOS ships `say`; other platforms fall back to logging until a native
+/// backend is wired.
+fn asumi_speak(text: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        // Detached: don't block the desktop bridge reader on synthesis.
+        match Command::new("/usr/bin/say").arg(text).spawn() {
+            Ok(child) => eprintln!("[tauri] tts speaking (pid {})", child.id()),
+            Err(error) => eprintln!("[tauri] tts failed: {error}"),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        println!("[asumi-desktop] speak: {text}");
+    }
+}
+
+/// Dispatch one inbound desktop command from the `asumi-desktop` bridge.
+fn handle_asumi_desktop_message(app: &AppHandle, msg: &Value) {
+    let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    eprintln!("[tauri] asumi-desktop <- {kind}");
+    match kind {
+        "speak" => {
+            let text = msg.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if !text.is_empty() {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("アスミ")
+                    .body(text)
+                    .show();
+                asumi_speak(text);
+            }
+        }
+        "notify" => {
+            let title = msg.get("title").and_then(|v| v.as_str()).unwrap_or("Asumi");
+            let body = msg.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            let _ = app.notification().builder().title(title).body(body).show();
+        }
+        "pet-state" => {
+            let state = msg.get("state").and_then(|v| v.as_str()).unwrap_or("neutral");
+            println!("[asumi-desktop] pet-state -> {state}");
+            // Phase 3b: forward to the pet window once it exists.
+            let _ = app.emit("asumi://pet-state", json!({ "state": state }));
+        }
+        "audio" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            println!("[asumi-desktop] audio -> {name}");
+        }
+        other => {
+            println!("[asumi-desktop] unhandled message: {other}");
+        }
+    }
+}
+
+/// Connect to the Asumi desktop bridge and keep consuming its JSON-line stream.
+///
+/// Reconnects with a short backoff: DSH (which hosts the bridge) may still be
+/// starting when this thread first runs.
+fn spawn_asumi_desktop_client(app: &AppHandle) {
+    let app = app.clone();
+    thread::spawn(move || {
+        let addr = std::env::var("ASUMI_DESKTOP_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .map(|p| format!("127.0.0.1:{p}"))
+            .unwrap_or_else(|| "127.0.0.1:3099".to_string());
+
+        loop {
+            match TcpStream::connect(&addr) {
+                Ok(stream) => {
+                    eprintln!("[tauri] asumi-desktop bridge connected ({addr})");
+                    let reader = BufReader::new(stream);
+                    for line in reader.lines() {
+                        match line {
+                            Ok(line) => {
+                                if line.trim().is_empty() {
+                                    continue;
+                                }
+                                match serde_json::from_str::<Value>(&line) {
+                                    Ok(msg) => handle_asumi_desktop_message(&app, &msg),
+                                    Err(_) => eprintln!("[tauri] bad desktop frame: {line}"),
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    eprintln!("[tauri] asumi-desktop bridge disconnected; retrying");
+                }
+                Err(_) => { /* bridge not up yet */ }
+            }
+            thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let bridge = Arc::new(BackendBridge::new());
@@ -1238,6 +1336,9 @@ pub fn run() {
             install_sigterm_exit(app_handle.clone(), Arc::clone(&bridge_for_setup));
             let bridge = bridge_for_setup;
             std::thread::spawn(move || spawn_backend_loop(&app_handle, &bridge));
+
+            // Connect to the Asumi desktop bridge hosted by the DSH plugin.
+            spawn_asumi_desktop_client(app.handle());
 
             // Watch for the DSH URL file (written by beforeDevCommand: spawn-dsh.mjs)
             // and navigate the main window once DSH is ready.
