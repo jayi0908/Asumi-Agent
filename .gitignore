@@ -33,3 +33,7 @@ build/
 src/main/migrations
 src/main/packages
 src/main/resources
+
+# Runtime artifacts written by the backend / DSH wrapper on each start
+src/renderer/assets/cherry-backend-port.json
+dist/dsh-url.json
