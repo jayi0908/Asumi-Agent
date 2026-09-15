@@ -1,0 +1,14 @@
+{
+  "name": "asumi-plugin-persona",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Asumi's character persona (錦 あすみ) for DeepSeek Harness",
+  "main": "index.js",
+  "files": ["index.js", "cordis.patch.yml", "persona.md"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

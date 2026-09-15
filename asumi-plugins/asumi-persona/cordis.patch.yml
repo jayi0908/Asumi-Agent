@@ -1,0 +1,12 @@
+# asumi-persona bundle layer
+#
+# 1. Clear the generic coding-agent persona prefix so Asumi's persona (registered
+#    by index.js at order 0) is the deployment identity.
+# 2. Insert the plugin row that registers the persona section + service.
+- id: system-prompt
+  config:
+    personaPrefix: ''
+    personaSuffix: Your working directory is {{cwd}}.
+- insert:
+    - id: asumi-persona
+      name: asumi-plugin-persona
