@@ -10,7 +10,7 @@ Asumi Agent 是以 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-ha
 
 | 文档 | 性质 | 说明 |
 |---|---|---|
-| [`dsh-engine.md`](./dsh-engine.md) | **架构与验证（持续更新）** | 引擎接入、模型、桌面桥、桌宠、屏幕理解、快捷呼出的实现与实测结果 |
+| [`dsh-engine.md`](./dsh-engine.md) | **架构与验证（持续更新）** | 引擎接入、模型、桌面桥、桌宠、屏幕理解、快捷呼出、打包的实现与实测结果 |
 | [`dsh-spike.md`](./dsh-spike.md) | 历史报告 | Phase 0 结论：DSH 能否作为本应用的引擎 |
 
 ## 参考（Cherry Studio 移植）

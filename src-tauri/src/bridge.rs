@@ -7,10 +7,10 @@
 //! comes up.
 
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -26,15 +26,31 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 /// reader owns the stream; `TcpStream::try_clone` provides the second handle.
 static WRITER: Mutex<Option<TcpStream>> = Mutex::new(None);
 static SCREENSHOT_SEQ: AtomicU64 = AtomicU64::new(0);
+static PORT: OnceLock<u16> = OnceLock::new();
+
+/// The port the bridge listens on, agreed with the engine at launch.
+///
+/// The engine is told this value through `ASUMI_DESKTOP_PORT`, so a stale
+/// engine from an earlier run cannot be mistaken for this run's agent: a fresh
+/// port is chosen whenever one is still held.
+pub fn port() -> u16 {
+    *PORT.get_or_init(|| {
+        if let Ok(port) = std::env::var("ASUMI_DESKTOP_PORT") {
+            if let Ok(port) = port.parse::<u16>() {
+                return port;
+            }
+        }
+        TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .map(|addr| addr.port())
+            .unwrap_or(DEFAULT_PORT)
+    })
+}
 
 /// Connect to the bridge and keep consuming its command stream.
 pub fn spawn_client(app: AppHandle) {
     std::thread::spawn(move || {
-        let addr = std::env::var("ASUMI_DESKTOP_PORT")
-            .ok()
-            .and_then(|port| port.parse::<u16>().ok())
-            .unwrap_or(DEFAULT_PORT);
-        let addr = format!("127.0.0.1:{addr}");
+        let addr = format!("127.0.0.1:{}", port());
 
         loop {
             match TcpStream::connect(&addr) {

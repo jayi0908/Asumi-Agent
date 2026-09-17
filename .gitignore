@@ -16,12 +16,14 @@ pnpm-debug.log*
 # Local environment overrides
 *.local
 
-# Runtime artifacts
-# The engine URL the dev launcher writes once DSH is listening.
-dist/dsh-url.json
-
 # Host-package links generated for the in-repo Asumi plugins (postinstall).
 asumi-plugins/node_modules
+
+# Production engine tree and Node sidecar assembled by `pnpm build`
+# (scripts/build-engine.mjs, scripts/fetch-node.mjs), plus their download cache.
+src-tauri/engine
+src-tauri/binaries
+src-tauri/.cache
 
 # Editor and OS files
 .vscode/*

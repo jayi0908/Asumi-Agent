@@ -1,7 +1,7 @@
 # Asumi Agent 架构
 
 > 分支：`feat/dsh-engine`
-> 状态：引擎 / 模型 / 桌宠 / 屏幕理解 / 快捷呼出 均已实测
+> 状态：引擎 / 模型 / 桌宠 / 屏幕理解 / 快捷呼出 / 打包 均已实测
 
 ## 组成
 
@@ -9,9 +9,9 @@ Asumi Agent 由三块组成，互不越界：
 
 | 层 | 位置 | 职责 |
 |---|---|---|
-| 引擎 | `@deepseek-ai/dsh`（`node_modules`） | 会话、模型、工具、UI（web client） |
+| 引擎 | `@deepseek-ai/dsh` | 会话、模型、工具、UI（web client） |
 | 能力 | `asumi-plugins/*`（DSH bundle） | 人设、桌面能力、工具 |
-| 宿主 | `src-tauri/`（Rust） | 窗口、桌宠、桌面桥、系统集成 |
+| 宿主 | `src-tauri/`（Rust） | 启动引擎、窗口、桌宠、桌面桥、系统集成 |
 
 **Cherry Studio 的代码不在本分支**，只保留在 `migration-plan` 分支上供参考与迁移。
 
@@ -19,21 +19,38 @@ Asumi Agent 由三块组成，互不越界：
 
 ```
 Tauri shell (Rust)
-  ├─ beforeDevCommand: node scripts/spawn-dsh.mjs
-  │    ├─ :9999  占位 HTTP 服务（满足 Tauri CLI 的 devUrl 探测）
-  │    ├─ spawn  pnpm dsh --profile asumi --no-open
-  │    └─ 解析 stdout 的 token URL → 写入 dist/dsh-url.json
-  └─ dsh::watch 轮询 dist/dsh-url.json → 导航 main / quickAssistant
+  ├─ engine::spawn        启动引擎（见下），解析 stdout 的 token URL
+  ├─ dsh::publish         拿到 URL → 导航 main / quickAssistant
+  └─ bridge::spawn_client 连接插件开的桌面桥
 
 DSH engine (Node, Cordis)
   └─ $DSH_HOME/profiles/asumi  =  @deepseek-ai/dsh-base
                                 + @deepseek-ai/dsh-web-app
                                 + asumi-plugin-persona
                                 + asumi-plugin-desktop
-       └─ :3080  DSH web client（token 认证，cookie 会话）
+       └─ :<随机端口>  DSH web client（token 认证，cookie 会话）
 ```
 
-`$DSH_HOME` 默认 `~/Library/Application Support/AsumiAgent`（可用 `DSH_HOME` 覆盖）。
+引擎由壳自己启动，因此**没有占位 HTTP 服务、没有 `devUrl`、没有 URL 文件**：
+开发与打包走同一条代码路径。窗口先显示 `src-tauri/loading/index.html`，
+引擎就绪后导航过去。
+
+端口都不固定：
+
+- 引擎用 `--port 0`，由系统分配 web client 端口（URL 里带回来）。
+- 桌面桥端口由壳分配（`bind :0` 拿一个空闲端口），通过 `ASUMI_DESKTOP_PORT`
+  传给插件，两端必然一致。
+
+这样即使上一次运行残留了引擎，也不会阻塞或误连。
+
+## 引擎位置
+
+| 场景 | 引擎 | Node |
+|---|---|---|
+| 开发 | 仓库 `node_modules/` | `PATH` 上的 `node` |
+| 打包 | `Contents/Resources/engine/` | `Contents/MacOS/node`（sidecar） |
+
+可用 `ASUMI_ENGINE_DIR` / `ASUMI_NODE` 覆盖，排障时很有用。
 
 ## 仓库结构
 
@@ -42,24 +59,24 @@ asumi-plugins/           DSH bundle（能力都在这里）
   asumi-persona/         人设：系统提示词 section + {{asumi_name}} 变量
   asumi-desktop/         桌面桥：asumi_speak / asumi_look / asumi_presence
 scripts/
-  spawn-dsh.mjs          占位服务 + 启动引擎 + 写出 dev URL
+  build-engine.mjs       组装打包用的引擎树（src-tauri/engine）
+  fetch-node.mjs         取 Node 运行时当 sidecar（src-tauri/binaries）
   link-dsh-packages.mjs  把宿主 DSH 包软链进 asumi-plugins/node_modules（postinstall）
   configure-asumi-model.mjs  把 Cherry 的服务商/模型迁进 DSH 用户设置
 src-tauri/
   src/lib.rs             模块装配 + run()
-  src/dsh.rs             引擎 URL 发现与就绪导航
-  src/bridge.rs          桌面桥客户端、截图、base64
+  src/engine.rs          启动 / 预置 profile / 关停引擎
+  src/dsh.rs             引擎 URL 持有与 webview 导航
+  src/bridge.rs          桌面桥客户端、截图、base64、端口分配
   src/pet.rs             桌宠窗口与存在模式
   src/quick.rs           ⌘E 快捷助手窗口
   src/tray.rs            菜单栏
   src/voice.rs           TTS
   pet/index.html         桌宠页面（透明，file:// 加载）
-  loading/index.html     生产构建的"启动中"页（frontendDist）
+  loading/index.html     启动页（frontendDist）
+  tauri.bundle.conf.json 打包用配置叠加层（见下）
 docs/reference/          Cherry Studio 移植资料（代码不在本分支）
 ```
-
-Tauri 壳不含任何引擎逻辑：它只负责把一个 webview 指向引擎，并做插件做不到的
-系统集成。
 
 ## 首次准备
 
@@ -103,7 +120,7 @@ node scripts/configure-asumi-model.mjs --modalities text,image
 
 ```
 asumi_speak / asumi_look / asumi_presence   (插件工具)
-        │  line-JSON, 127.0.0.1:${ASUMI_DESKTOP_PORT:-3099}
+        │  line-JSON, 127.0.0.1:<壳分配的端口>
         ▼
 src-tauri/src/bridge.rs  ──►  桌宠窗口 / TTS / 通知 / 截图
 ```
@@ -145,8 +162,59 @@ TTS 按文本书写系统选语音（假名→ja/`Kyoko`，汉字→zh/`Tingting
 
 ## 快捷呼出
 
-`⌘E` 在 `quick.rs` 里全局注册（不再经过任何后端服务）：首次呼出时创建一个指向引擎
-的 webview（共用 main 的会话 cookie），失焦即隐藏，再按一次也隐藏。
+`⌘E` 在 `quick.rs` 里全局注册：首次呼出时创建一个指向引擎的 webview（共用 main 的
+会话 cookie），失焦即隐藏，再按一次也隐藏。
+
+## 打包
+
+```bash
+pnpm build     # = tauri build --config src-tauri/tauri.bundle.conf.json
+```
+
+产物是一个完全自带的 `.app`（当前约 400MB）：
+
+| 内容 | 大小 | 来源 |
+|---|---|---|
+| 引擎树 | ~276MB | `scripts/build-engine.mjs` → `src-tauri/engine/` |
+| Node 运行时 | ~117MB | `scripts/fetch-node.mjs` → `src-tauri/binaries/node-<triple>` |
+| 壳 | ~9MB | cargo release |
+
+两件东西通过 `src-tauri/tauri.bundle.conf.json`（一个 `--config` 叠加层）声明：
+
+```json
+{ "bundle": { "resources": ["engine"], "externalBin": ["binaries/node"] } }
+```
+
+**为什么放在叠加层而不是主配置**：Tauri 会对 `resources` / `externalBin` 的路径做
+构建期校验，且**开发构建也会校验**，放主配置会让 `pnpm dev` 也必须先下载 Node。
+叠加层把这份要求限定在打包路径上。
+
+引擎树的组装要点（`build-engine.mjs`）：
+
+- **用 `nodeLinker: hoisted`**：打包会把 resource 拷进 `.app` 并签名，pnpm 默认的
+  软链农场两者都过不去。hoisted 得到一棵扁平、全是真实文件的树。
+- **运行时不依赖 pnpm**：DSH 从 profile 自己的 `node_modules` 解析插件，所以
+  `asumi-plugins/*` 直接拷进 `engine/profiles/asumi/node_modules/`。
+  `pnpm` 只有 `dsh plugin` 用得到，而 app 从不调用它。
+- 首次启动时把 `engine/profiles/asumi` 拷到 `$DSH_HOME/profiles/asumi`（不存在时）。
+  想重新预置就删掉它再启动。
+- 宿主包（`cordis` / `dsh-tools` / `dsh-system-prompt` / `schemastery`）在引擎树里
+  是**直接依赖**，版本取自当前开发树已解析的版本，保证插件 import 与引擎用同一份。
+
+Node 运行时（`fetch-node.mjs`）：
+
+- 默认只取**宿主架构**；交叉出包时用 `--target` 指定。
+- 本机 Node 版本与 `NODE_VERSION` 一致时**直接复用** `process.execPath`：harness 的
+  原生插件（koffi、node-pty）就是用它编译的，ABI 必然匹配，而且不用下载。
+- 否则从 nodejs.org 下载（`--http1.1` + 断点续传），缓存在 `src-tauri/.cache/`。
+
+CI（`.github/workflows/`）：
+
+- `release.yml` 打 `v*` tag 时出包：git-cliff 生成更新日志 → 双架构构建 → 发布草稿。
+- `build.yml` 在 `main` / `feat/dsh-engine` 上做构建校验。
+- **每个架构跑在自己的 runner 上**（arm64 用 `macos-14`，x86_64 用 `macos-13`）：
+  原生插件是给运行机器编译的，arm64 runner 造不出 x86_64 的引擎。
+- workflow 里的 `node-version` 必须与 `fetch-node.mjs` 的 `NODE_VERSION` 一致。
 
 ## 首次使用：工作区
 
@@ -168,16 +236,22 @@ DSH 的空会话要求先选一个工作区（「添加工作区」走原生目�
 
 | 项 | 结果 |
 |---|---|
-| `pnpm dev` | ✅ 引擎 + 壳联动，webview 自动导航 |
-| 引擎就绪 | ✅ `:3080` 监听，无 `did not activate` |
-| 模型路由 | ✅ `llm/listProviders` 返回 `qwen3-8`，默认模型显示 `Qwen3.8-27B-Uncensored-FP8` |
-| 工具链路 | ✅ `asumi_presence` → `pet mode -> ghost`；`asumi_speak` → `tts speaking (voice Kyoko)` |
-| 屏幕理解 | ✅ `asumi_look` → `capture-screen 3420x2224` → 模型正确描述当前屏幕 |
+| `pnpm dev` | ✅ 壳启动引擎，webview 自动导航 |
+| `pnpm build` | ✅ 产出 400MB 自带 `.app` |
+| 自带启动 | ✅ 干净 `$DSH_HOME` 下：预置 profile → 用 bundled Node 跑 bundled 引擎 |
+| 端口 | ✅ 动态分配（实测 web :61834 / bridge :61831），不撞残留进程 |
+| 关停 | ✅ `SIGTERM` → `signal 15; stopping the engine` → 引擎一并退出 |
+| 模型路由 | ✅ 默认模型显示 `Qwen3.8-27B-Uncensored-FP8` |
+| 工具链路 | ✅ 打包版实测 `pet-mode → always`、`speak → voice Kyoko`、`capture-screen 3420x2224` |
 
 ## 已知事项
 
-- DSH 为 developer preview（`0.1.5-rc.1`），升级需重新跑一遍验证表。
-- 生产打包尚未接：`tauri build` 用 `loading/index.html` 作 `frontendDist`，但还没有
-  随包启动引擎的机制（当前只有 dev 链路）。
+- DSH 为 developer preview（`0.1.5-rc.1`），升级需重新跑一遍验证表，
+  并注意 `schemastery` / `cordis` 的版本要与引擎树一致。
+- **未做签名与公证**：CI 出的包是未签名 `.app`，首次打开需要右键「打开」或去隔离属性。
+  接 `APPLE_CERTIFICATE` 等 secret 后 `tauri-action` 可直接签名/公证。
+- 重新组装引擎要 4 分钟（完整 `pnpm install`）；`build-engine.mjs` 在
+  `src-tauri/engine` 已是当前版本时会跳过，CI 用 cache 缓存该目录。
 - 音频播放（`playAudio` / 桥命令 `audio`）按计划跳过，桥里仍是占位日志。
-- 非 macOS 平台：`screencapture` 与 `say` 未实现，截图会回 `ok:false`、TTS 退化为日志。
+- 非 macOS 平台：`screencapture` 与 `say` 未实现（截图回 `ok:false`，TTS 退化为日志），
+  `fetch-node.mjs` 也只处理 darwin 目标。

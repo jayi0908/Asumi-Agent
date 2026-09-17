@@ -12,8 +12,10 @@
   "scripts": {
     "postinstall": "node scripts/link-dsh-packages.mjs",
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "tauri build --config src-tauri/tauri.bundle.conf.json",
     "tauri": "tauri",
+    "build:engine": "node scripts/build-engine.mjs",
+    "fetch:node": "node scripts/fetch-node.mjs",
     "configure:model": "node scripts/configure-asumi-model.mjs"
   },
   "dependencies": {

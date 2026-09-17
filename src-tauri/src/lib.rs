@@ -12,12 +12,13 @@
 
 pub mod bridge;
 pub mod dsh;
+pub mod engine;
 pub mod pet;
 pub mod quick;
 pub mod tray;
 pub mod voice;
 
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 
 /// Window labels owned by the shell.
 pub mod labels {
@@ -30,6 +31,11 @@ pub const QUICK_SHORTCUT: &str = "CmdOrCtrl+E";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Block termination signals before the runtime spawns its threads: a mask
+    // is inherited per thread, so anything started later would otherwise take
+    // the signal and exit before the engine can be stopped.
+    engine::handle_signals();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -46,16 +52,18 @@ pub fn run() {
             tray::install(&handle);
             quick::register_shortcut(&handle);
 
-            // Answer the engine's desktop bridge and follow its readiness.
+            // Answer the engine's desktop bridge, then start the engine and
+            // let it publish the URL the webviews navigate to.
             bridge::spawn_client(handle.clone());
-            dsh::watch(handle);
+            engine::spawn(&handle);
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while running Asumi Agent")
-        // The engine is a child of the dev command (or of whoever launched this
-        // process), so it is reaped with the process tree rather than tracked
-        // here; run() therefore has no exit work of its own.
-        .run(|_app, _event| {});
+        .run(|_app, event| {
+            if let RunEvent::Exit = event {
+                engine::shutdown();
+            }
+        });
 }

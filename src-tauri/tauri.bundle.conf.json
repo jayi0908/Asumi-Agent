@@ -1,0 +1,9 @@
+{
+  "build": {
+    "beforeBuildCommand": "node scripts/build-engine.mjs && node scripts/fetch-node.mjs"
+  },
+  "bundle": {
+    "resources": ["engine"],
+    "externalBin": ["binaries/node"]
+  }
+}

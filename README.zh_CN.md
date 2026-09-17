@@ -75,10 +75,10 @@ pnpm install
 # 创建引擎 profile（仅首次；插件通过 link: 指向本仓库）
 pnpm dsh --profile asumi --from-default-profile web
 
-# 开发模式运行 —— 同时启动引擎与桌面壳
+# 开发模式运行 —— 桌面壳自己启动引擎
 pnpm dev
 
-# 构建生产版本
+# 构建完全自带的 .app（内置引擎与 Node 运行时）
 pnpm build
 ```
 

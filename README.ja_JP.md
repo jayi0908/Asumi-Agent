@@ -76,10 +76,10 @@ pnpm install
 # エンジンの profile を作成（初回のみ）
 pnpm dsh --profile asumi --from-default-profile web
 
-# 開発モードで起動 —— エンジンとデスクトップシェルを同時に起動
+# 開発モードで起動 —— シェルがエンジン自体を起動します
 pnpm dev
 
-# 製品版をビルドする
+# 完全自己完結の .app をビルド（エンジンと Node ランタイムを同梱）
 pnpm build
 ```
 

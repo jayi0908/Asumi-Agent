@@ -4,8 +4,6 @@
   "version": "0.1.0",
   "identifier": "com.asumi.agent",
   "build": {
-    "beforeDevCommand": "node scripts/spawn-dsh.mjs",
-    "devUrl": "http://127.0.0.1:9999/",
     "frontendDist": "./loading"
   },
   "app": {

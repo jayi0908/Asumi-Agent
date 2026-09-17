@@ -77,10 +77,10 @@ pnpm install
 # Create the engine profile (first run only; the plugins are linked from this repo)
 pnpm dsh --profile asumi --from-default-profile web
 
-# Run in dev mode — starts the engine and the shell together
+# Run in dev mode — the shell starts the engine itself
 pnpm dev
 
-# Build released version
+# Build a self-contained .app (bundles the engine and a Node runtime)
 pnpm build
 ```
 
