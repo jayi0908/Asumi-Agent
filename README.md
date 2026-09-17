@@ -37,9 +37,16 @@ The project is in early development, starting from macOS, with the following pla
 
 ## Tech Stack
 
-- **Desktop Framework**: Tauri 2
-- **Frontend**: React + TypeScript + TailwindCSS
-- **Backend Language**: Rust
+- **Desktop host**: Tauri 2 (Rust) — windows, menu bar, pet, tray, desktop bridge
+- **Agent engine**: [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — runs the
+  conversation, every tool call, and every model request, and serves the UI as a web client
+- **Capabilities**: DSH bundles under [`asumi-plugins/`](./asumi-plugins) (persona, desktop bridge, tools)
+
+The shell contains no agent logic: it points a webview at the engine and does the
+system integration a plugin cannot.
+
+> The Cherry Studio (Electron → Tauri) port this project grew out of is kept on the
+> `migration-plan` branch for reference and migration only; it is not part of this app.
 
 ## Build from Source Code
 
@@ -62,15 +69,25 @@ brew install node pnpm
 # Clone the repo
 git clone https://github.com/jayi0908/Asumi-Agent.git
 cd Asumi-Agent
-# Build front-end dependency
+
+# Install dependencies; the postinstall links the DSH host packages the
+# in-repo plugins import
 pnpm install
 
-# Run in dev mode
-pnpm tauri dev
+# Create the engine profile (first run only; the plugins are linked from this repo)
+pnpm dsh --profile asumi --from-default-profile web
+
+# Run in dev mode — starts the engine and the shell together
+pnpm dev
 
 # Build released version
-pnpm tauri build
+pnpm build
 ```
+
+The engine keeps its state under `$DSH_HOME`
+(`~/Library/Application Support/AsumiAgent` by default). To use the model provider
+you already configured in Cherry Studio, see
+[`scripts/configure-asumi-model.mjs`](./scripts/configure-asumi-model.mjs).
 
 ## Acknowledgements
 

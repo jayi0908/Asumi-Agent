@@ -1,26 +1,33 @@
 # docs 目录索引
 
-本目录记录 **Cherry Studio（Electron）→ Tauri 2 移植** 的计划、状态与功能核查结果。
+Asumi Agent 是以 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）
+为引擎、以 Tauri 2 为桌面宿主的 AI 伴侣应用。本目录记录它自己的设计与验证。
+
+> Cherry Studio（Electron → Tauri 移植）的代码**不在本分支**，只保留在 `migration-plan`
+> 分支上供参考与迁移。与之相关的文档收在 [`reference/`](./reference) 下。
 
 ## 文档地图
 
 | 文档 | 性质 | 说明 |
 |---|---|---|
-| [`feature-coverage.md`](./feature-coverage.md) | **功能核查（持续更新）** | 对照官方文档 docs.cherryai.com.cn 逐项核查可行性；含未实现/平台受限/待验收清单 |
-| [`migration-plan.md`](./migration-plan.md) | 计划（进行中） | 移植总计划、硬性规则、分阶段任务；§9 为当前执行状态 |
-| [`migration-source-map.md`](./migration-source-map.md) | 状态表（进行中） | 目录/窗口/传输/Sidebar 的文件级对照与状态 |
-| [`CHERRY_BASELINE`](./CHERRY_BASELINE) | 基准 | 对照的 Cherry 上游 commit |
-| [`generated/ipc-channel-map.md`](./generated/ipc-channel-map.md) | 生成物 | `pnpm gen:ipc-map` 由 `IpcChannel.ts` 生成，勿手工删行 |
+| [`dsh-engine.md`](./dsh-engine.md) | **架构与验证（持续更新）** | 引擎接入、模型、桌面桥、桌宠、屏幕理解、快捷呼出的实现与实测结果 |
+| [`dsh-spike.md`](./dsh-spike.md) | 历史报告 | Phase 0 结论：DSH 能否作为本应用的引擎 |
 
-## 归档
+## 参考（Cherry Studio 移植）
 
-| 文档 | 原因 |
+这些文档描述 `migration-plan` 分支上的 Cherry 移植工作，本分支已不包含其代码。
+
+| 文档 | 说明 |
 |---|---|
-| [`archive/phase2-backend.md`](./archive/phase2-backend.md) | 早期 Phase 2 里程碑快照（2025-07-13），其中的 "Known gaps" 已被 `migration-plan.md §9` 取代，仅作历史留存 |
+| [`reference/feature-coverage.md`](./reference/feature-coverage.md) | Cherry Studio 官方文档逐项核查 |
+| [`reference/migration-plan.md`](./reference/migration-plan.md) | 移植总计划与执行状态 |
+| [`reference/migration-source-map.md`](./reference/migration-source-map.md) | 文件级对照与状态 |
+| [`reference/CHERRY_BASELINE`](./reference/CHERRY_BASELINE) | 对照的 Cherry 上游 commit |
+| [`reference/generated/ipc-channel-map.md`](./reference/generated/ipc-channel-map.md) | Cherry IPC 通道生成物 |
+| [`reference/archive/phase2-backend.md`](./reference/archive/phase2-backend.md) | 早期里程碑快照 |
 
 ## 维护约定
 
-- `migration-plan.md §5` 的 checkbox 是**计划**，实际进度以 `§9 当前执行状态` 为准，两者不一致时以 §9 为准。
-- `feature-coverage.md` 的状态需在做过一项**运行路径验收**后再从 ⚠️ 升级为 ✅，并附证据（日志/DB/操作序列）。
-- 生成物（`generated/`）不要手工编辑；改生成脚本后重新运行。
-- 平台受限项（🚫）必须保留产品入口，不因未实现而从 UI/路由删除。
+- `dsh-engine.md` 的验证表只在做过一次**真实运行路径验收**后更新，并附证据（日志 / API / 操作序列）。
+- 引擎固定精确版本（`@deepseek-ai/dsh@0.1.5-rc.1`）：DSH 是 developer preview，升级后需重新跑一遍验证表。
+- 桌面能力一律以 **DSH 插件（`asumi-plugins/*`）** 实现；Tauri 壳只做插件做不了的事（窗口、桥、系统集成）。

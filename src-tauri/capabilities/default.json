@@ -1,25 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Asumi Agent (DSH-powered)",
-  "windows": [
-    "main"
-  ],
-  "permissions": [
-    "core:default",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-set-focus",
-    "core:window:allow-set-size",
-    "core:window:allow-set-position",
-    "core:window:allow-center",
-    "core:window:allow-close",
-    "core:window:allow-create",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-read-image",
-    "clipboard-manager:allow-write-image",
-    "notification:default",
-    "opener:default"
-  ]
+  "description": "The shell drives its windows and the engine bridge from Rust; the webviews only render the DSH web client, so they need no plugin permissions of their own.",
+  "windows": ["main", "quickAssistant", "pet"],
+  "permissions": ["core:default"]
 }

@@ -19,12 +19,12 @@ asumi-plugins/
 | 插件 | 作用 | 状态 |
 |---|---|---|
 | `asumi-persona` | 錦 あすみ 的人设（system prompt 段）+ `asumi_name` 变量 | ✅ |
-| `asumi-desktop` | 桌面桥：`ctx.asumiDesktop`（speak / pet-state / audio / notify / capture-screen）+ `asumi_speak` 工具；监听 `127.0.0.1:3099` 供 Tauri 连接 | ✅ 桥接已通（Tauri 客户端 Phase 3） |
+| `asumi-desktop` | 桌面桥：`ctx.asumiDesktop`（speak / pet-state / pet-mode / audio / notify / capture-screen）+ 工具 `asumi_speak` / `asumi_look` / `asumi_presence`；监听 `127.0.0.1:3099` 供 Tauri 连接 | ✅ 通话链路已实测 |
 
 ## 安装到 profile
 
 ```bash
-export DSH_HOME="$HOME/Library/Application Support/CherryStudio-TauriDev"
+export DSH_HOME="$HOME/Library/Application Support/AsumiAgent"
 pnpm dsh plugin --profile asumi add ./asumi-plugins/<plugin-dir>
 ```
 

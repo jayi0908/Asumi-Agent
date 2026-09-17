@@ -37,9 +37,15 @@
 
 ## 技术栈
 
-- **桌面框架**：Tauri 2
-- **前端**：React + TypeScript + TailwindCSS
-- **后端语言**：Rust
+- **桌面宿主**：Tauri 2（Rust）——窗口、菜单栏、桌宠、托盘、桌面桥
+- **Agent 引擎**：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+  ——负责对话、工具调用、所有模型请求，并以 web client 形式提供 UI
+- **能力**：`asumi-plugins/` 下的 DSH bundle（人设、桌面桥、工具）
+
+Tauri 壳不含任何 Agent 逻辑：它只把 webview 指向引擎，并做插件做不到的系统集成。
+
+> 本项目起点的 Cherry Studio（Electron → Tauri）移植代码只保留在 `migration-plan`
+> 分支上供参考与迁移，不属于本应用。
 
 ## 从源码构建
 
@@ -62,15 +68,23 @@ brew install node pnpm
 # 克隆仓库
 git clone https://github.com/jayi0908/Asumi-Agent.git
 cd Asumi-Agent
-# 安装前端依赖
+
+# 安装依赖；postinstall 会链接仓库内插件要 import 的 DSH 宿主包
 pnpm install
 
-# 开发模式运行
-pnpm tauri dev
+# 创建引擎 profile（仅首次；插件通过 link: 指向本仓库）
+pnpm dsh --profile asumi --from-default-profile web
+
+# 开发模式运行 —— 同时启动引擎与桌面壳
+pnpm dev
 
 # 构建生产版本
-pnpm tauri build
+pnpm build
 ```
+
+引擎状态保存在 `$DSH_HOME`（默认 `~/Library/Application Support/AsumiAgent`）。
+想直接复用之前在 Cherry Studio 里配置的模型服务商，见
+[`scripts/configure-asumi-model.mjs`](./scripts/configure-asumi-model.mjs)。
 
 ## 致谢
 

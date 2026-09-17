@@ -1,24 +1,19 @@
 [package]
-name = "cherry-studio-tauri"
-version = "2.0.0"
-description = "Cherry Studio desktop shell on Tauri 2"
+name = "asumi-agent"
+version = "0.1.0"
+description = "Asumi Agent desktop shell: a Tauri host for the DeepSeek Harness engine"
 authors = ["jayi0908"]
 edition = "2021"
 
 [lib]
-name = "cherry_studio_tauri_lib"
+name = "asumi_agent_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-libc = "0.2"
 tauri = { version = "2", features = ["image-png", "macos-private-api", "tray-icon"] }
-tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
-tauri-plugin-clipboard-manager = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 tauri-plugin-notification = "2"
+serde_json = "1"

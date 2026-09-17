@@ -3,6 +3,10 @@
 > 日期：2026-09-15
 > 分支：`feat/dsh-engine`
 > 目的：验证 `@deepseek-ai/dsh`（Cordis + Harness）能否作为 Asumi Agent 的插件化引擎，运行在 Tauri 桌面壳之下。
+>
+> **历史文档**：结论仍然有效，但 §④ 与各表格里提到的 "Cherry Node 后端 / 渲染层" 资产
+> 已从本分支移除（保留在 `migration-plan` 分支）。当前架构见
+> [`dsh-engine.md`](./dsh-engine.md)。
 
 ---
 

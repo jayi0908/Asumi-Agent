@@ -26,12 +26,26 @@ import { join } from 'node:path'
 import { parseDocument, stringify } from 'yaml'
 
 const DSH_HOME =
-  process.env.DSH_HOME || join(homedir(), 'Library/Application Support/CherryStudio-TauriDev')
-const DB_PATH = process.env.CHERRY_DATA_DIR
-  ? join(process.env.CHERRY_DATA_DIR, 'cherrystudio.sqlite')
-  : join(DSH_HOME, 'cherrystudio.sqlite')
+  process.env.DSH_HOME || join(homedir(), 'Library/Application Support/AsumiAgent')
 const SETTINGS_PATH = join(DSH_HOME, 'settings.yaml')
 const CREDENTIALS_PATH = join(DSH_HOME, '.credentials.yaml')
+
+/**
+ * Where Cherry Studio's database may live.
+ *
+ * Asumi Agent never ships Cherry Studio, so this script is a one-time
+ * migration helper: it reaches into the Cherry app data that the port used to
+ * write, which can sit beside the harness home or in Cherry's own location.
+ */
+const CHERRY_DB_CANDIDATES = [
+  process.env.CHERRY_DATA_DIR && join(process.env.CHERRY_DATA_DIR, 'cherrystudio.sqlite'),
+  join(homedir(), 'Library/Application Support/CherryStudio-TauriDev/cherrystudio.sqlite'),
+  join(homedir(), 'Library/Application Support/CherryStudio-Tauri/cherrystudio.sqlite'),
+  join(homedir(), 'Library/Application Support/CherryStudio/cherrystudio.sqlite'),
+  join(DSH_HOME, 'cherrystudio.sqlite')
+].filter(Boolean)
+
+const DB_PATH = CHERRY_DB_CANDIDATES.find((candidate) => existsSync(candidate))
 
 const CREDENTIAL_ENV = 'ASUMI_MODEL_API_KEY'
 
@@ -96,10 +110,11 @@ function readCredentials() {
 function main() {
   const options = parseArgs(process.argv.slice(2))
 
-  if (!existsSync(DB_PATH)) {
+  if (!DB_PATH) {
     throw new Error(
-      `Cherry database not found at ${DB_PATH}\n` +
-        `Set CHERRY_DATA_DIR to the directory holding cherrystudio.sqlite.`
+      'Cherry database not found. Looked in:\n' +
+        CHERRY_DB_CANDIDATES.map((candidate) => `  ${candidate}`).join('\n') +
+        '\nSet CHERRY_DATA_DIR to the directory holding cherrystudio.sqlite.'
     )
   }
 

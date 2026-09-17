@@ -1,22 +1,29 @@
+# Dependencies and build output
+node_modules
+dist
+build/
+src-tauri/target
+.pnpm-store
+*.tsbuildinfo
+
 # Logs
 logs
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Local environment overrides
 *.local
-src-tauri/target
-.tsbuildinfo
-.pnpm-store
-build/
 
-# Editor directories and files
+# Runtime artifacts
+# The engine URL the dev launcher writes once DSH is listening.
+dist/dsh-url.json
+
+# Host-package links generated for the in-repo Asumi plugins (postinstall).
+asumi-plugins/node_modules
+
+# Editor and OS files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -28,15 +35,3 @@ build/
 *.sw?
 
 .claude/
-
-# Cherry symlink targets within src/main (in-repo siblings)
-src/main/migrations
-src/main/packages
-src/main/resources
-
-# Runtime artifacts written by the backend / DSH wrapper on each start
-src/renderer/assets/cherry-backend-port.json
-dist/dsh-url.json
-
-# Host-package links generated for the in-repo Asumi plugins (postinstall)
-asumi-plugins/node_modules

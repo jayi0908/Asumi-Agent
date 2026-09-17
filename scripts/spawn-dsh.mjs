@@ -20,7 +20,7 @@ const root = resolve(__dirname, '..')
 
 const DSH_HOME = process.env.DSH_HOME || resolve(
   process.env.HOME || '',
-  'Library/Application Support/CherryStudio-TauriDev'
+  'Library/Application Support/AsumiAgent'
 )
 
 const PLACEHOLDER_PORT = 9999

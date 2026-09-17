@@ -37,9 +37,16 @@
 
 ## 技術スタック
 
-- **デスクトップフレームワーク**：Tauri 2
-- **フロントエンド**：React + TypeScript + TailwindCSS
-- **バックエンド言語**：Rust
+- **デスクトップホスト**：Tauri 2（Rust）— ウィンドウ、メニューバー、デスクトップペット、トレイ、デスクトップブリッジ
+- **エージェントエンジン**：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+  — 会話・ツール呼び出し・すべてのモデルリクエストを実行し、UI を web client として提供
+- **ケイパビリティ**：`asumi-plugins/` 配下の DSH bundle（ペルソナ、デスクトップブリッジ、ツール）
+
+Tauri シェルはエージェントのロジックを持ちません。webview をエンジンに向け、プラグインでは
+できないシステム統合だけを担当します。
+
+> 出発点となった Cherry Studio（Electron → Tauri）移植コードは `migration-plan` ブランチに
+> 参考・移行用として残っているだけで、本アプリの一部ではありません。
 
 ## ソースコードからのビルド
 
@@ -61,15 +68,24 @@ brew install node pnpm
 # リポジトリをクローン
 git clone https://github.com/jayi0908/Asumi-Agent.git
 cd Asumi-Agent
-# 依存関係をインストール
+
+# 依存関係をインストール（postinstall がリポジトリ内プラグインの
+# import する DSH ホストパッケージをリンクします）
 pnpm install
 
-# 開発サーバーを起動
-pnpm tauri dev
+# エンジンの profile を作成（初回のみ）
+pnpm dsh --profile asumi --from-default-profile web
+
+# 開発モードで起動 —— エンジンとデスクトップシェルを同時に起動
+pnpm dev
 
 # 製品版をビルドする
-pnpm tauri build
+pnpm build
 ```
+
+エンジンの状態は `$DSH_HOME`（既定：`~/Library/Application Support/AsumiAgent`）に保存されます。
+Cherry Studio で設定済みのモデルプロバイダーを引き継ぐ場合は
+[`scripts/configure-asumi-model.mjs`](./scripts/configure-asumi-model.mjs) を参照してください。
 
 ## 謝辞
 
