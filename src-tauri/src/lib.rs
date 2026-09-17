@@ -731,7 +731,24 @@ fn handle_sys(
                 return Ok(json!({ "created": false, "label": label }));
             }
 
-            let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(app_path.into()))
+            // The quick-assistant popup talks to the Asumi engine, not the
+            // Cherry renderer: it loads the DSH web client on the same session
+            // cookies the main window authenticated with. Until the engine has
+            // announced its URL the Cherry entry is a placeholder; the DSH
+            // watcher navigates the window once the URL is known.
+            let quick_assistant = label == labels::QUICK_ASSISTANT;
+            let dsh = if quick_assistant { known_dsh_url() } else { None };
+            let (width, height) = if quick_assistant && dsh.is_some() {
+                (width.max(720.0), height.max(560.0))
+            } else {
+                (width, height)
+            };
+            let web_url = match dsh.as_deref().and_then(|url| tauri::Url::parse(url).ok()) {
+                Some(url) => WebviewUrl::External(url),
+                None => WebviewUrl::App(app_path.into()),
+            };
+
+            let mut builder = WebviewWindowBuilder::new(app, &label, web_url)
                 .title(label.clone())
                 .inner_size(width, height)
                 .decorations(frame)
@@ -1260,14 +1277,181 @@ fn asumi_speak(text: &str) {
     }
 }
 
+/// Write half of the bridge connection, kept so commands can be answered.
+///
+/// The reader thread owns the stream; screen-capture replies need a second
+/// handle, which `TcpStream::try_clone` provides. Cleared on disconnect.
+static DESKTOP_WRITER: Mutex<Option<TcpStream>> = Mutex::new(None);
+static SCREENSHOT_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Pet presence mode: `always` (常驻), `ghost` (透明), or `hidden`.
+///
+/// `always` keeps Asumi on screen. `ghost` keeps the window alive but fully
+/// transparent until she speaks, then fades her back out. `hidden` takes the
+/// window off screen entirely.
+static PET_MODE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Token-authenticated DSH web client URL, once the engine announces it.
+///
+/// Saved so windows created later (the quick-assistant popup) can point at the
+/// engine instead of the Cherry renderer.
+static DSH_URL: Mutex<Option<String>> = Mutex::new(None);
+
+/// The DSH URL announced by `scripts/spawn-dsh.mjs`, if it is already on disk.
+fn dsh_url_from_file() -> Option<String> {
+    let content = std::fs::read_to_string(resolve_repo_root().join("dist/dsh-url.json")).ok()?;
+    let info: Value = serde_json::from_str(&content).ok()?;
+    info.get("url").and_then(|v| v.as_str()).map(str::to_string)
+}
+
+/// The DSH URL this process knows about, from the watcher or from disk.
+fn known_dsh_url() -> Option<String> {
+    DSH_URL
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .or_else(dsh_url_from_file)
+}
+
+/// Remember the DSH URL and navigate a webview window to it.
+fn navigate_to_dsh(app: &AppHandle, label: &str, url: &str) {
+    let literal = serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string());
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.eval(&format!("window.location.href = {literal}"));
+    }
+}
+
+/// Encode bytes as standard base64 (RFC 4648).
+///
+/// Hand-rolled to avoid a new dependency for the one place the bridge needs it.
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Send one JSON line to the bridge, if it is still connected.
+fn bridge_reply(message: &Value) {
+    let Ok(mut guard) = DESKTOP_WRITER.lock() else {
+        return;
+    };
+    let Some(stream) = guard.as_mut() else {
+        return;
+    };
+    let mut line = match serde_json::to_string(message) {
+        Ok(line) => line,
+        Err(_) => return,
+    };
+    line.push('\n');
+    if stream.write_all(line.as_bytes()).is_err() || stream.flush().is_err() {
+        *guard = None;
+    }
+}
+
+/// Answer one `capture-screen` request with a base64 PNG (or an error).
+///
+/// macOS needs Screen Recording permission for the capture to include window
+/// contents; without it `screencapture` still exits 0 but returns only the
+/// desktop background. The reply carries `ok:false` whenever no image was
+/// produced so the agent can tell the user instead of describing a blank frame.
+fn handle_capture_screen(request_id: &str, msg: &Value) {
+    let mut reply = json!({ "type": "capture-screen-result", "requestId": request_id });
+    let result = capture_screen_png(msg);
+    match result {
+        Ok((bytes, width, height)) => {
+            reply["ok"] = json!(true);
+            reply["mediaType"] = json!("image/png");
+            reply["data"] = json!(base64_encode(&bytes));
+            reply["width"] = json!(width);
+            reply["height"] = json!(height);
+            eprintln!("[tauri] capture-screen {width}x{height} ({} bytes)", bytes.len());
+        }
+        Err(error) => {
+            reply["ok"] = json!(false);
+            reply["error"] = json!(error);
+            eprintln!("[tauri] capture-screen failed: {error}");
+        }
+    }
+    bridge_reply(&reply);
+}
+
+/// Run the platform screenshot tool and return the PNG bytes and dimensions.
+#[cfg(target_os = "macos")]
+fn capture_screen_png(msg: &Value) -> Result<(Vec<u8>, u32, u32), String> {
+    let seq = SCREENSHOT_SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("asumi-shot-{}-{seq}.png", std::process::id()));
+
+    let mut command = Command::new("/usr/sbin/screencapture");
+    command.arg("-x").arg("-t").arg("png");
+    if let Some(display) = msg.get("display").and_then(|v| v.as_i64()) {
+        command.arg("-D").arg(display.to_string());
+    }
+    if let Some(region) = msg.get("region").and_then(|v| v.as_str()) {
+        command.arg("-R").arg(region);
+    }
+    command.arg(&path);
+
+    let status = command
+        .status()
+        .map_err(|e| format!("could not run screencapture: {e}"))?;
+    if !status.success() {
+        return Err(format!("screencapture exited with {status}"));
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| format!("could not read screenshot: {e}"))?;
+    let _ = std::fs::remove_file(&path);
+    if bytes.len() < 24 {
+        return Err("screencapture produced an empty image (is Screen Recording allowed?)".into());
+    }
+
+    // PNG IHDR: width and height are big-endian u32 at offsets 16 and 20.
+    let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    Ok((bytes, width, height))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_screen_png(_msg: &Value) -> Result<(Vec<u8>, u32, u32), String> {
+    Err("screen capture is only implemented for macOS".into())
+}
+
 /// Dispatch one inbound desktop command from the `asumi-desktop` bridge.
 fn handle_asumi_desktop_message(app: &AppHandle, msg: &Value) {
     let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
     eprintln!("[tauri] asumi-desktop <- {kind}");
     match kind {
+        "capture-screen" => {
+            let request_id = msg
+                .get("requestId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !request_id.is_empty() {
+                handle_capture_screen(&request_id, msg);
+            }
+        }
         "speak" => {
             let text = msg.get("text").and_then(|v| v.as_str()).unwrap_or("");
             if !text.is_empty() {
+                reveal_pet(app);
                 let literal = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
                 pet_eval(
                     app,
@@ -1289,12 +1473,17 @@ fn handle_asumi_desktop_message(app: &AppHandle, msg: &Value) {
         }
         "pet-state" => {
             let state = msg.get("state").and_then(|v| v.as_str()).unwrap_or("neutral");
+            reveal_pet(app);
             let literal = serde_json::to_string(state).unwrap_or_else(|_| "\"neutral\"".to_string());
             pet_eval(
                 app,
                 &format!("window.__asumiSetState && window.__asumiSetState({literal})"),
             );
             let _ = app.emit("asumi://pet-state", json!({ "state": state }));
+        }
+        "pet-mode" => {
+            let mode = msg.get("mode").and_then(|v| v.as_str()).unwrap_or("always");
+            apply_pet_mode(app, mode);
         }
         "audio" => {
             let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -1323,6 +1512,16 @@ fn spawn_asumi_desktop_client(app: &AppHandle) {
             match TcpStream::connect(&addr) {
                 Ok(stream) => {
                     eprintln!("[tauri] asumi-desktop bridge connected ({addr})");
+                    // Keep a write handle so capture-screen can answer on the
+                    // same connection the commands arrive on.
+                    match stream.try_clone() {
+                        Ok(writer) => {
+                            if let Ok(mut guard) = DESKTOP_WRITER.lock() {
+                                *guard = Some(writer);
+                            }
+                        }
+                        Err(error) => eprintln!("[tauri] bridge write handle failed: {error}"),
+                    }
                     let reader = BufReader::new(stream);
                     for line in reader.lines() {
                         match line {
@@ -1337,6 +1536,9 @@ fn spawn_asumi_desktop_client(app: &AppHandle) {
                             }
                             Err(_) => break,
                         }
+                    }
+                    if let Ok(mut guard) = DESKTOP_WRITER.lock() {
+                        *guard = None;
                     }
                     eprintln!("[tauri] asumi-desktop bridge disconnected; retrying");
                 }
@@ -1399,6 +1601,59 @@ fn pet_eval(app: &AppHandle, script: &str) {
     }
 }
 
+/// The current presence mode, defaulting to 常驻 (`always`).
+fn current_pet_mode() -> String {
+    PET_MODE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .unwrap_or_else(|| "always".to_string())
+}
+
+/// Switch the pet window between the always-on, ghost, and hidden presences.
+fn apply_pet_mode(app: &AppHandle, mode: &str) {
+    let mode = match mode {
+        "ghost" | "transparent" => "ghost",
+        "hidden" | "off" => "hidden",
+        _ => "always",
+    };
+    if let Ok(mut guard) = PET_MODE.lock() {
+        *guard = Some(mode.to_string());
+    }
+
+    let literal = serde_json::to_string(mode).unwrap_or_else(|_| "\"always\"".to_string());
+    pet_eval(
+        app,
+        &format!("window.__asumiSetMode && window.__asumiSetMode({literal})"),
+    );
+
+    if let Some(pet) = app.get_webview_window(PET_LABEL) {
+        match mode {
+            "hidden" => {
+                let _ = pet.hide();
+            }
+            // Ghost mode starts transparent and is revealed by speech, so the
+            // window stays mapped while the page keeps it invisible.
+            _ => {
+                let _ = pet.show();
+            }
+        }
+    }
+    let _ = app.emit("asumi://pet-mode", json!({ "mode": mode }));
+    eprintln!("[tauri] pet mode -> {mode}");
+}
+
+/// Bring the pet window forward for one utterance, fading it back in ghost mode.
+fn reveal_pet(app: &AppHandle) {
+    if current_pet_mode() != "ghost" {
+        return;
+    }
+    if let Some(pet) = app.get_webview_window(PET_LABEL) {
+        let _ = pet.show();
+    }
+    pet_eval(app, "window.__asumiReveal && window.__asumiReveal()");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let bridge = Arc::new(BackendBridge::new());
@@ -1448,7 +1703,7 @@ pub fn run() {
             ensure_pet_window(app.handle());
 
             // Watch for the DSH URL file (written by beforeDevCommand: spawn-dsh.mjs)
-            // and navigate the main window once DSH is ready.
+            // and navigate the webviews once DSH is ready.
             let app_handle_dsh = app.handle().clone();
             let url_file = resolve_repo_root().join("dist/dsh-url.json");
             std::thread::spawn(move || {
@@ -1458,11 +1713,16 @@ pub fn run() {
                         if let Ok(info) = serde_json::from_str::<serde_json::Value>(&content) {
                             if let Some(url) = info.get("url").and_then(|v| v.as_str()) {
                                 eprintln!("[tauri] DSH ready at {url}");
+                                if let Ok(mut guard) = DSH_URL.lock() {
+                                    *guard = Some(url.to_string());
+                                }
                                 // Give the webview a moment to settle on about:blank
                                 std::thread::sleep(std::time::Duration::from_millis(500));
-                                if let Some(win) = app_handle_dsh.get_webview_window(labels::MAIN) {
-                                    let _ = win.eval(&format!("window.location.href = '{url}'"));
-                                }
+                                navigate_to_dsh(&app_handle_dsh, labels::MAIN, url);
+                                // A quick-assistant window built before the
+                                // engine was ready still holds the Cherry
+                                // placeholder; move it onto the engine too.
+                                navigate_to_dsh(&app_handle_dsh, labels::QUICK_ASSISTANT, url);
                                 break;
                             }
                         }

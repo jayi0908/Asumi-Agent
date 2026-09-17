@@ -26,6 +26,24 @@
         flex-direction: column;
         justify-content: flex-end;
         align-items: center;
+        opacity: 1;
+        transition: opacity 0.45s ease;
+      }
+
+      /* Presence modes, driven by the shell's `__asumiSetMode`:
+         常驻 always — fully visible;
+         透明 ghost  — invisible until Asumi speaks, then fades back out;
+         hidden      — the shell also takes the window off screen. */
+      body[data-mode="ghost"] .stage {
+        opacity: 0;
+      }
+
+      body[data-mode="ghost"].ghost-active .stage {
+        opacity: 1;
+      }
+
+      body[data-mode="hidden"] .stage {
+        opacity: 0;
       }
 
       .bubble {
@@ -85,18 +103,36 @@
       body[data-state="thinking"] .asumi { animation-duration: 5s; }
     </style>
   </head>
-  <body data-state="neutral">
+  <body data-state="neutral" data-mode="always">
     <div class="stage">
       <div class="bubble" id="bubble"></div>
       <img class="asumi" id="asumi" src="./asumi.png" alt="Asumi" />
     </div>
     <script>
       const bubble = document.getElementById('bubble')
+      const GHOST_REVEAL_MS = 9000
       let hideTimer = null
+      let revealTimer = null
+      let mode = 'always'
 
       // Called from the Tauri shell when the agent changes the pet mood.
       window.__asumiSetState = (state) => {
         document.body.dataset.state = state || 'neutral'
+      }
+
+      // Called from the Tauri shell when the presence mode changes.
+      window.__asumiSetMode = (next) => {
+        mode = next || 'always'
+        document.body.dataset.mode = mode
+        if (mode !== 'ghost') document.body.classList.remove('ghost-active')
+      }
+
+      // Called from the Tauri shell to show Asumi briefly in ghost mode.
+      window.__asumiReveal = () => {
+        if (mode !== 'ghost') return
+        document.body.classList.add('ghost-active')
+        if (revealTimer) clearTimeout(revealTimer)
+        revealTimer = setTimeout(() => document.body.classList.remove('ghost-active'), GHOST_REVEAL_MS)
       }
 
       // Called from the Tauri shell when Asumi speaks.
@@ -104,6 +140,7 @@
         if (!text) return
         bubble.textContent = text
         bubble.classList.add('show')
+        window.__asumiReveal()
         if (hideTimer) clearTimeout(hideTimer)
         hideTimer = setTimeout(() => bubble.classList.remove('show'), 6000)
       }

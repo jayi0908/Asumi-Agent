@@ -7,6 +7,7 @@ import { Service } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 const DEFAULT_PORT = 3099
+const DEFAULT_TIMEOUT_MS = 20_000
 
 function resolveDshHome() {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
@@ -16,31 +17,50 @@ function resolveDshHome() {
  * Line-delimited JSON bridge to the Tauri shell.
  *
  * The agent side is the server: the Tauri shell connects once at startup to
- * receive desktop commands (speak, pet state, audio, notifications) and to
- * answer requests (screen capture). When nothing is connected the bridge stays
- * in detached mode so the agent never blocks on the desktop being absent.
+ * receive desktop commands (speak, pet state, notifications, screen capture)
+ * and to answer the ones that need a result. Frames are newline-delimited and
+ * buffered per socket, because a screen-capture reply is far larger than one
+ * TCP read. When nothing is connected the bridge stays in detached mode so the
+ * agent never blocks on the desktop being absent.
  */
 function createBridge() {
   const port = Number(process.env.ASUMI_DESKTOP_PORT || DEFAULT_PORT)
   const clients = new Set()
+  const pending = new Map()
   let ready = false
+  let nextRequest = 0
+
+  function settle(message) {
+    const entry = pending.get(message.requestId)
+    if (!entry) return
+    pending.delete(message.requestId)
+    clearTimeout(entry.timer)
+    if (message.ok === false) entry.reject(new Error(message.error || 'desktop request failed'))
+    else entry.resolve(message)
+  }
+
+  function consume(socket, chunk) {
+    socket.buffer += chunk
+    let index
+    while ((index = socket.buffer.indexOf('\n')) >= 0) {
+      const line = socket.buffer.slice(0, index)
+      socket.buffer = socket.buffer.slice(index + 1)
+      if (!line.trim()) continue
+      try {
+        const message = JSON.parse(line)
+        if (message.type === 'capture-screen-result') settle(message)
+        else console.log('[asumi-desktop] inbound', message.type)
+      } catch {
+        console.warn('[asumi-desktop] dropping malformed frame')
+      }
+    }
+  }
 
   const server = createServer((socket) => {
-    clients.add(socket)
+    socket.buffer = ''
     socket.setEncoding('utf8')
-    socket.on('data', (chunk) => {
-      // Inbound frames (e.g. a screen-capture response) are handled by the
-      // desktop client in Phase 3; ignore unknown lines for now.
-      for (const line of String(chunk).split('\n')) {
-        if (!line.trim()) continue
-        try {
-          const msg = JSON.parse(line)
-          console.log('[asumi-desktop] inbound', msg.type)
-        } catch {
-          /* ignore malformed frames */
-        }
-      }
-    })
+    clients.add(socket)
+    socket.on('data', (chunk) => consume(socket, chunk))
     socket.on('close', () => clients.delete(socket))
     socket.on('error', () => clients.delete(socket))
   })
@@ -83,7 +103,27 @@ function createBridge() {
     return delivered
   }
 
+  /** Send a command and await the matching `capture-screen-result`-style reply. */
+  function request(message, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const requestId = `asumi-${++nextRequest}`
+    if (send({ ...message, requestId }) === 0) {
+      return Promise.reject(new Error('desktop 未连接，无法完成这个操作'))
+    }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(requestId)
+        reject(new Error('桌面响应超时'))
+      }, timeoutMs)
+      pending.set(requestId, { resolve, reject, timer })
+    })
+  }
+
   function close() {
+    for (const entry of pending.values()) {
+      clearTimeout(entry.timer)
+      entry.reject(new Error('desktop bridge closed'))
+    }
+    pending.clear()
     try {
       server.close()
     } catch {
@@ -99,12 +139,12 @@ function createBridge() {
     clients.clear()
   }
 
-  return { send, close, port, isReady: () => ready, clientCount: () => clients.size }
+  return { send, request, close, port, isReady: () => ready, clientCount: () => clients.size }
 }
 
 export const name = 'asumi-desktop'
 
-export const inject = ['tools']
+export const inject = ['tools', 'attachments']
 
 export function apply(ctx) {
   const bridge = createBridge()
@@ -126,6 +166,11 @@ export function apply(ctx) {
       return bridge.send({ type: 'pet-state', state })
     }
 
+    /** Switch presence: `always` (常驻), `ghost` (透明), or `hidden`. */
+    setPetMode(mode) {
+      return bridge.send({ type: 'pet-mode', mode })
+    }
+
     /** Play a bundled audio asset by name. */
     playAudio(name) {
       return bridge.send({ type: 'audio', name })
@@ -136,9 +181,12 @@ export function apply(ctx) {
       return bridge.send({ type: 'notify', title, body })
     }
 
-    /** Request a screen frame; the shell answers asynchronously. */
+    /**
+     * Grab a screen frame. Resolves with `{ mediaType, data, width, height }`
+     * where `data` is base64; rejects when no desktop is connected.
+     */
     captureScreen(options = {}) {
-      bridge.send({ type: 'capture-screen', ...options })
+      return bridge.request({ type: 'capture-screen', ...options })
     }
 
     /** Whether a desktop client is currently connected. */
@@ -175,6 +223,72 @@ export function apply(ctx) {
           return delivered > 0
             ? `已通过桌宠说出：${args.text}`
             : `桌面未连接，暂存了这句话：${args.text}`
+        }
+      })
+    )
+  )
+
+  ctx.effect(() =>
+    ctx.tools.register(
+      defineTool({
+        name: 'asumi_presence',
+        description:
+          '切换あすみ在桌面上的存在方式。always：常驻，一直留在屏幕上；ghost：透明，只在开口时短暂出现；hidden：暂时从桌面消失。先輩说「先别出来」「安静一点」时用 ghost 或 hidden，说「出来吧」时用 always。',
+        parameters: {
+          mode: {
+            type: 'string',
+            required: true,
+            description: 'always / ghost / hidden'
+          }
+        },
+        output: {
+          schema: { type: 'string' },
+          render: (_args, value) => [{ type: 'text', text: value }]
+        },
+        execute(args) {
+          const mode = ['always', 'ghost', 'hidden'].includes(args.mode) ? args.mode : 'always'
+          const delivered = bridge.send({ type: 'pet-mode', mode })
+          const label = { always: '常驻', ghost: '透明', hidden: '隐藏' }[mode]
+          return delivered > 0
+            ? `已把桌面上的あすみ切到${label}模式`
+            : `桌面未连接，暂未切换桌宠模式（${mode}）`
+        }
+      })
+    )
+  )
+
+  ctx.effect(() =>
+    ctx.tools.register(
+      defineTool({
+        name: 'asumi_look',
+        description:
+          '看先輩的屏幕。截取当前桌面画面，并以图片的形式附在这次结果里，用于回答和屏幕有关的问题、读屏幕上的文字、或陪着先輩一起看。返回后直接根据看到的画面作答。',
+        parameters: {
+          question: { type: 'string', description: '想从屏幕上了解什么，例如「这段报错是什么」' }
+        },
+        output: {
+          schema: { type: 'json' },
+          render: (args, value) => [
+            { type: 'image', attachment: value.attachment },
+            {
+              type: 'text',
+              text: args.question
+                ? `这是先輩现在的屏幕（${value.attachment.width}x${value.attachment.height}）。先輩想知道：${args.question}`
+                : `这是先輩现在的屏幕（${value.attachment.width}x${value.attachment.height}）。`
+            }
+          ]
+        },
+        async execute(args) {
+          const shot = await bridge.request({ type: 'capture-screen' })
+          const [admitted] = await ctx.attachments.admitPromptContent([
+            {
+              type: 'image',
+              mediaType: shot.mediaType || 'image/png',
+              data: shot.data,
+              name: 'asumi-screen.png'
+            }
+          ])
+          return { attachment: admitted.attachment, question: args.question ?? '' }
         }
       })
     )

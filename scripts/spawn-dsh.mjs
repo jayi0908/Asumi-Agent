@@ -11,7 +11,7 @@
  */
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -42,6 +42,10 @@ const placeholder = createServer((_req, res) => {
   res.end(LOADING_HTML)
 })
 placeholder.listen(PLACEHOLDER_PORT, '127.0.0.1')
+
+// A leftover URL from an earlier run would send the shell to a dead token
+// before this run's engine is up, so the file's presence must mean "ready".
+rmSync(URL_FILE, { force: true })
 
 // ── Spawn DSH ───────────────────────────────────────────────────────
 const child = spawn('pnpm', ['dsh', '--profile', 'asumi', '--no-open'], {
