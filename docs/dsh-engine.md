@@ -216,6 +216,41 @@ CI（`.github/workflows/`）：
   原生插件是给运行机器编译的，arm64 runner 造不出 x86_64 的引擎。
 - workflow 里的 `node-version` 必须与 `fetch-node.mjs` 的 `NODE_VERSION` 一致。
 
+## 签名与公证
+
+**结论先说**：公证（notarization）**必须**有付费的 Apple Developer Program 会员
+（$99/年）和 Developer ID 证书，没有免费途径，也没有技术绕道。免费 Apple ID 只能给
+「开发签名」（装到自己的设备上调试），既拿不到 Developer ID，也不能提交公证。
+
+没有会员时能做、且已经做掉的部分：
+
+| 项 | 状态 | 作用 |
+|---|---|---|
+| **ad-hoc 签名**（`signingIdentity: "-"`） | ✅ 已启用 | 让 bundle 内部自洽：`codesign --verify --deep --strict` 通过、Resources 被封存（2.4 万文件）。避免 "app is damaged" 这类**无法自愈**的报错。 |
+| **JIT entitlements** | ✅ 已启用 | 内置 Node 需要 `allow-jit` 等权限才能在 hardened runtime 下启动；证书换成 Developer ID 后这份 entitlement 同样适用。 |
+| **release notes 写清安装步骤** | ✅ 已加到 workflow | 用户知道该敲哪条命令，而不是面对「无法打开」发呆。 |
+| 公证 | ❌ 需要会员 | Gatekeeper 仍会 `spctl rejected`，首次打开要清隔离属性。 |
+
+ad-hoc 之后用户侧仍然要做一次（这是唯一剩下的一步）：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Asumi Agent.app"
+```
+
+或右键 app →「打开」；macOS 15 起若仍被拦，去「系统设置 → 隐私与安全性」点「仍要打开」。
+
+> ad-hoc 签名解决的是「签名不一致导致的 damaged」，**不是**「未识别开发者」。
+> 后者只能靠 Developer ID + 公证，或者用户手动放行。
+
+### 以后拿到会员要改什么
+
+1. 在仓库 secrets 里放 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、
+   `APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`。
+2. 删掉 `tauri.bundle.conf.json` 里的 `signingIdentity: "-"`（或改成 secret 里的身份）。
+3. `entitlements.plist` 保持不变。
+
+`tauri-action` 会自动签名并公证，release 步骤不需要改。
+
 ## 首次使用：工作区
 
 DSH 的空会话要求先选一个工作区（「添加工作区」走原生目录选择器）。选择结果写在
@@ -248,8 +283,8 @@ DSH 的空会话要求先选一个工作区（「添加工作区」走原生目�
 
 - DSH 为 developer preview（`0.1.5-rc.1`），升级需重新跑一遍验证表，
   并注意 `schemastery` / `cordis` 的版本要与引擎树一致。
-- **未做签名与公证**：CI 出的包是未签名 `.app`，首次打开需要右键「打开」或去隔离属性。
-  接 `APPLE_CERTIFICATE` 等 secret 后 `tauri-action` 可直接签名/公证。
+- **未做公证**：ad-hoc 签名已启用（bundle 自洽），但没有 Apple Developer 会员就无法
+  公证，首次打开仍要清隔离属性。见上文「签名与公证」。
 - 重新组装引擎要 4 分钟（完整 `pnpm install`）；`build-engine.mjs` 在
   `src-tauri/engine` 已是当前版本时会跳过，CI 用 cache 缓存该目录。
 - 音频播放（`playAudio` / 桥命令 `audio`）按计划跳过，桥里仍是占位日志。

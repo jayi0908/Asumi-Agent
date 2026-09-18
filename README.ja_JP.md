@@ -87,6 +87,19 @@ pnpm build
 Cherry Studio で設定済みのモデルプロバイダーを引き継ぐ場合は
 [`scripts/configure-asumi-model.mjs`](./scripts/configure-asumi-model.mjs) を参照してください。
 
+### リリース版のインストール
+
+リリース版は ad-hoc 署名のみで、**公証（notarization）はしていません**。公証には
+有料の Apple Developer Program が必要なため、macOS はダウンロードした app を隔離します。
+一度だけ隔離属性を外せば通常どおり起動できます：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Asumi Agent.app"
+```
+
+画面キャプチャには権限も必要です（システム設定 → プライバシーとセキュリティ →
+画面収録 → Asumi Agent を有効化）。
+
 ## 謝辞
 
 - [ハミダシクリエイティブ](https://madosoft.net/hamidashi) — あすみのキャラクターデザインと性格のインスピレーション。

@@ -89,6 +89,19 @@ The engine keeps its state under `$DSH_HOME`
 you already configured in Cherry Studio, see
 [`scripts/configure-asumi-model.mjs`](./scripts/configure-asumi-model.mjs).
 
+### Installing a released build
+
+Release builds are ad-hoc signed but **not notarized**: notarization requires the
+paid Apple Developer Program, so macOS quarantines the download. Clear the flag
+once and it opens normally:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Asumi Agent.app"
+```
+
+Screen capture also needs permission (System Settings → Privacy & Security →
+Screen Recording → enable Asumi Agent).
+
 ## Acknowledgements
 
 - [ハミダシクリエイティブ (Hamidashi Creative)](https://madosoft.net/hamidashi) — Inspiration for Asumi's character design and personality.

@@ -69,6 +69,46 @@ jobs:
         env:
           OUTPUT: changelog.gen.md
 
+      # The build is ad-hoc signed, so Gatekeeper quarantines it. Tell people
+      # the one command that makes it launch instead of letting them hit
+      # "cannot be opened" with no explanation.
+      - name: Append install notes
+        shell: bash
+        run: |
+          cat >> changelog.gen.md <<'NOTES'
+
+          ---
+
+          ## Installing (unsigned build)
+
+          These builds are not signed with an Apple Developer certificate: signing
+          and notarization require the paid Apple Developer Program. macOS
+          quarantines anything downloaded, so the first launch needs that flag
+          cleared:
+
+          ```bash
+          xattr -dr com.apple.quarantine "/Applications/Asumi Agent.app"
+          ```
+
+          Alternatively: right-click the app → Open. If macOS still refuses, allow it
+          once under System Settings → Privacy & Security → Open Anyway.
+
+          ## 安装（未签名构建）
+
+          发布包未使用 Apple 开发者证书签名（签名与公证需要付费的 Apple Developer
+          Program）。macOS 会隔离下载的 app，首次打开前先清掉隔离属性：
+
+          ```bash
+          xattr -dr com.apple.quarantine "/Applications/Asumi Agent.app"
+          ```
+
+          也可以右键点 app →「打开」；若仍被拦截，到「系统设置 → 隐私与安全性」点
+          「仍要打开」。
+
+          > Screen capture additionally needs permission: System Settings → Privacy &
+          > Security → Screen Recording → enable Asumi Agent.
+          NOTES
+
       - name: Set release body
         id: body
         shell: bash

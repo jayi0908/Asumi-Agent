@@ -4,6 +4,10 @@
   },
   "bundle": {
     "resources": ["engine"],
-    "externalBin": ["binaries/node"]
+    "externalBin": ["binaries/node"],
+    "macOS": {
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
+    }
   }
 }

@@ -86,6 +86,17 @@ pnpm build
 想直接复用之前在 Cherry Studio 里配置的模型服务商，见
 [`scripts/configure-asumi-model.mjs`](./scripts/configure-asumi-model.mjs)。
 
+### 安装发布包
+
+发布包是 ad-hoc 签名的，**没有公证**：公证需要付费的 Apple Developer Program，
+因此 macOS 会隔离下载的 app。清一次隔离属性即可正常打开：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Asumi Agent.app"
+```
+
+屏幕理解还需要授权（系统设置 → 隐私与安全性 → 屏幕录制 → 勾选 Asumi Agent）。
+
 ## 致谢
 
 - [ハミダシクリエイティブ](https://madosoft.net/hamidashi) — あすみ的形象和性格设计灵感来源。

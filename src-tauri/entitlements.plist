@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Entitlements for the bundled Node runtime.
+
+    Node compiles JavaScript to machine code at run time, which the hardened
+    runtime forbids unless the process says otherwise. These are the same
+    grants the official Node builds carry; without them the sidecar is killed
+    on launch instead of starting the engine.
+
+    They apply whether the bundle is signed with a Developer ID (the notarized
+    path) or ad-hoc signed (the no-Apple-account path).
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
