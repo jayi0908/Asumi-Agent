@@ -1,0 +1,14 @@
+{
+  "name": "asumi-plugin-fallback",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Retry a failed model request on a safe route, so an unavailable primary model does not end the turn",
+  "main": "index.js",
+  "files": ["index.js", "cordis.patch.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -35,7 +35,8 @@ const BUNDLES = [
   '@deepseek-ai/dsh-base',
   '@deepseek-ai/dsh-web-app',
   'asumi-plugin-persona',
-  'asumi-plugin-desktop'
+  'asumi-plugin-desktop',
+  'asumi-plugin-fallback'
 ]
 
 /**
@@ -68,7 +69,9 @@ const BUILT_DEPENDENCIES = [
 /** Plugins copied into the profile, with the package name DSH resolves. */
 const PLUGIN_PACKAGES = [
   { dir: 'asumi-persona', name: 'asumi-plugin-persona' },
-  { dir: 'asumi-desktop', name: 'asumi-plugin-desktop' }
+  { dir: 'asumi-desktop', name: 'asumi-plugin-desktop' },
+  // No host-package imports: it only uses the Cordis context.
+  { dir: 'asumi-fallback', name: 'asumi-plugin-fallback' }
 ]
 
 function readJson(path) {

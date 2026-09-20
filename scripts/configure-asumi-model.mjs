@@ -49,6 +49,14 @@ const DB_PATH = CHERRY_DB_CANDIDATES.find((candidate) => existsSync(candidate))
 
 const CREDENTIAL_ENV = 'ASUMI_MODEL_API_KEY'
 
+/**
+ * The route the fallback plugin uses, and the credential its adapter resolves.
+ * Migrated too, because a fallback nobody can authenticate against is worse
+ * than no fallback: the turn ends on the fallback's error instead.
+ */
+const FALLBACK_CREDENTIAL_ENV = 'DEEPSEEK_API_KEY'
+const FALLBACK_PROVIDER = 'deepseek'
+
 /** Cherry endpoint type -> pi-ai wire protocol. */
 const API_BY_ENDPOINT = {
   'openai-chat-completions': 'openai-completions',
@@ -95,6 +103,16 @@ function toRoute(name) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+/** The first enabled key of a Cherry provider, or undefined. */
+function readCherryKey(providerId) {
+  const rows = query(
+    `SELECT api_keys FROM user_provider WHERE provider_id = '${providerId.replace(/'/g, "''")}';`
+  )
+  if (!rows.length) return undefined
+  const keys = JSON.parse(rows[0].api_keys || '[]')
+  return keys.find((entry) => entry.isEnabled)?.key
 }
 
 function readSettings() {
@@ -169,10 +187,20 @@ function main() {
   const credentials = readCredentials()
   credentials.setIn(['refs', CREDENTIAL_ENV], apiKey)
 
+  // A DeepSeek key enables the fallback route; absent, the app simply has no
+  // fallback and says so at request time like any missing credential.
+  const fallbackKey = readCherryKey(FALLBACK_PROVIDER)
+  if (fallbackKey) credentials.setIn(['refs', FALLBACK_CREDENTIAL_ENV], fallbackKey)
+
   console.log(`route      ${route} (${api} -> ${endpoint.baseUrl})`)
   console.log(`model      ${model.model_id} [${modalities.join(', ')}]`)
   console.log(`settings   ${SETTINGS_PATH}`)
   console.log(`credential ${CREDENTIALS_PATH} refs.${CREDENTIAL_ENV}`)
+  console.log(
+    fallbackKey
+      ? `credential ${CREDENTIALS_PATH} refs.${FALLBACK_CREDENTIAL_ENV} (fallback route)`
+      : `no ${FALLBACK_PROVIDER} key in the Cherry database; fallback left unconfigured`
+  )
 
   if (options.dryRun) {
     console.log('\n--- settings.yaml ---')
