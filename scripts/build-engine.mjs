@@ -20,6 +20,7 @@
  *   node scripts/build-engine.mjs [--out <dir>] [--no-install]
  */
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,6 +30,9 @@ const args = process.argv.slice(2)
 const outIndex = args.indexOf('--out')
 const OUT = resolve(outIndex >= 0 ? args[outIndex + 1] : join(root, 'src-tauri/engine'))
 const SKIP_INSTALL = args.includes('--no-install')
+
+/** Marker recording which sources the assembled tree came from. */
+const FINGERPRINT_FILE = '.fingerprint'
 
 /** Bundles the profile composes, in order. */
 const BUNDLES = [
@@ -103,17 +107,42 @@ function installedVersion(name) {
 }
 
 /**
- * Whether `OUT` already holds an engine for `dshVersion`.
+ * A fingerprint of everything the assembled tree is built from.
+ *
+ * Deliberately includes the plugins, not just the harness version: a plugin
+ * edit must rebuild the tree, or a packaged app silently ships the previous
+ * plugin set — a failure that looks like the feature not working.
+ */
+function sourceFingerprint(dshVersion) {
+  const hash = createHash('sha256')
+  hash.update(`dsh@${dshVersion}\n`)
+  hash.update(`${BUNDLES.join(',')}\n`)
+  for (const plugin of PLUGIN_PACKAGES) {
+    hash.update(`${plugin.name}\n`)
+    for (const file of ['package.json', 'cordis.patch.yml', 'index.js', 'persona.md']) {
+      const path = join(root, 'asumi-plugins', plugin.dir, file)
+      if (!existsSync(path)) continue
+      hash.update(`${file}:`)
+      hash.update(readFileSync(path))
+      hash.update('\n')
+    }
+  }
+  return hash.digest('hex')
+}
+
+/**
+ * Whether `OUT` already holds an engine for the current sources.
  *
  * Building is a full reinstall, so `beforeBuildCommand` should not pay for it
  * on every build; `--force` (and a clean CI checkout) rebuilds.
  */
-function isCurrent(dshVersion) {
+function isCurrent(fingerprint) {
   const manifest = join(OUT, 'package.json')
   const entry = join(OUT, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
-  if (!existsSync(manifest) || !existsSync(entry)) return false
+  const stamp = join(OUT, FINGERPRINT_FILE)
+  if (!existsSync(manifest) || !existsSync(entry) || !existsSync(stamp)) return false
   try {
-    return readJson(manifest).dependencies?.['@deepseek-ai/dsh'] === dshVersion
+    return readFileSync(stamp, 'utf8').trim() === fingerprint
   } catch {
     return false
   }
@@ -121,7 +150,8 @@ function isCurrent(dshVersion) {
 
 function main() {
   const dshVersion = readJson(join(root, 'package.json')).dependencies['@deepseek-ai/dsh']
-  if (isCurrent(dshVersion) && !args.includes('--force')) {
+  const fingerprint = sourceFingerprint(dshVersion)
+  if (isCurrent(fingerprint) && !args.includes('--force')) {
     console.log(`[build-engine] ${OUT} is current for ${dshVersion} (use --force to rebuild)`)
     return
   }
@@ -212,6 +242,7 @@ function main() {
     console.log(`[build-engine] plugin ${plugin.name}`)
   }
 
+  writeFileSync(join(OUT, FINGERPRINT_FILE), `${fingerprint}\n`)
   console.log(`[build-engine] profile bundles: ${BUNDLES.join(', ')}`)
   console.log('[build-engine] done')
 }
