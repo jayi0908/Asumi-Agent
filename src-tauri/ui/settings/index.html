@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="initial-scale=1, width=device-width" />
+    <title>Asumi Agent 设置</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f6f8;
+        --card: #ffffff;
+        --text: #1d1d24;
+        --muted: #6b6b7a;
+        --line: #e3e3ea;
+        --accent: #7c5cff;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #17171d;
+          --card: #21212a;
+          --text: #ececf1;
+          --muted: #9a9aa8;
+          --line: #33333f;
+          --accent: #a68cff;
+        }
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, "PingFang SC", system-ui, sans-serif;
+        font-size: 13px;
+        overflow-y: auto;
+      }
+
+      header {
+        padding: 18px 22px 6px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      header p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      main {
+        padding: 12px 22px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+      }
+
+      h2 {
+        margin: 0 0 4px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      section > p {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+
+      .options {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      label.option {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 7px;
+        cursor: pointer;
+      }
+
+      label.option:hover {
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+      }
+
+      label.option input {
+        margin: 2px 0 0;
+        accent-color: var(--accent);
+      }
+
+      .option .name {
+        font-weight: 500;
+      }
+
+      .option .hint {
+        display: block;
+        color: var(--muted);
+        font-size: 11.5px;
+        margin-top: 1px;
+      }
+
+      .field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 5px 0;
+      }
+
+      .field > span {
+        color: var(--muted);
+      }
+
+      select {
+        min-width: 190px;
+        padding: 4px 6px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+      }
+
+      footer {
+        padding: 0 22px 20px;
+        color: var(--muted);
+        font-size: 11.5px;
+        min-height: 16px;
+      }
+
+      footer.saved {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Asumi Agent 设置</h1>
+      <p>
+        这里只放桌面侧的设置。模型、人格、Skill 属于引擎，请在主界面的设置里改。
+      </p>
+    </header>
+
+    <main>
+      <section>
+        <h2>出现模组</h2>
+        <p>あすみ 登场与退场的方式。</p>
+        <div class="options" id="appearance"></div>
+      </section>
+
+      <section>
+        <h2>出现方式</h2>
+        <p>她平时在不在屏幕上，以及说完话之后是否收回。</p>
+        <div class="options" id="presence"></div>
+      </section>
+
+      <section>
+        <h2>语音</h2>
+        <p>留空表示按文本语言自动选择。改动在下一句话生效。</p>
+        <div class="field">
+          <span>统一使用</span>
+          <select id="voice"></select>
+        </div>
+        <div class="field">
+          <span>日语（假名）</span>
+          <select id="voiceJa"></select>
+        </div>
+        <div class="field">
+          <span>中文（汉字）</span>
+          <select id="voiceZh"></select>
+        </div>
+        <div class="field">
+          <span>其它语言</span>
+          <select id="voiceEn"></select>
+        </div>
+      </section>
+
+      <section>
+        <h2>交互</h2>
+        <div class="options" id="interaction"></div>
+      </section>
+    </main>
+
+    <footer id="status"></footer>
+
+    <script>
+      const invoke = window.asumi.invoke
+
+      const APPEARANCE_HINTS = {
+        fade: '原地淡入淡出。',
+        'peek-bottom': '从屏幕右下角探头，说完收回。',
+        'peek-top': '从屏幕右上角探头，说完收回。'
+      }
+
+      const PRESENCE_HINTS = {
+        always: '一直留在屏幕上。',
+        ghost: '平时隐藏，开口时按上面的模组出现，5 秒后收回。',
+        hidden: '从桌面消失，只留菜单栏。'
+      }
+
+      const APPEARANCE_NAMES = {
+        fade: '淡入淡出',
+        'peek-bottom': '右下角探头',
+        'peek-top': '右上角探头'
+      }
+
+      const PRESENCE_NAMES = {
+        always: '常驻',
+        ghost: '透明',
+        hidden: '隐藏'
+      }
+
+      let state = null
+      let options = null
+      const status = document.getElementById('status')
+
+      function radioGroup(container, values, current, names, hints, onPick) {
+        container.replaceChildren()
+        for (const value of values) {
+          const label = document.createElement('label')
+          label.className = 'option'
+
+          const input = document.createElement('input')
+          input.type = 'radio'
+          input.name = container.id
+          input.value = value
+          input.checked = value === current
+          input.addEventListener('change', () => {
+            if (input.checked) onPick(value)
+          })
+
+          const text = document.createElement('div')
+          const name = document.createElement('span')
+          name.className = 'name'
+          name.textContent = names[value] || value
+          text.append(name)
+          if (hints[value]) {
+            const hint = document.createElement('span')
+            hint.className = 'hint'
+            hint.textContent = hints[value]
+            text.append(hint)
+          }
+
+          label.append(input, text)
+          container.append(label)
+        }
+      }
+
+      function fillVoices(select, current) {
+        select.replaceChildren()
+        const auto = document.createElement('option')
+        auto.value = ''
+        auto.textContent = '按语言自动'
+        select.append(auto)
+        for (const voice of options.voices) {
+          const option = document.createElement('option')
+          option.value = voice
+          option.textContent = voice
+          select.append(option)
+        }
+        // A configured voice the machine does not have still has to show, or
+        // saving would silently change it.
+        if (current && !options.voices.includes(current)) {
+          const missing = document.createElement('option')
+          missing.value = current
+          missing.textContent = current + '（未安裝）'
+          select.append(missing)
+        }
+        select.value = current || ''
+      }
+
+      function render() {
+        radioGroup(
+          document.getElementById('appearance'),
+          options.appearances,
+          state.appearance,
+          APPEARANCE_NAMES,
+          APPEARANCE_HINTS,
+          (value) => update({ appearance: value })
+        )
+        radioGroup(
+          document.getElementById('presence'),
+          options.presences,
+          state.presence,
+          PRESENCE_NAMES,
+          PRESENCE_HINTS,
+          (value) => update({ presence: value })
+        )
+        radioGroup(
+          document.getElementById('interaction'),
+          ['true', 'false'],
+          String(state.clickThrough),
+          { true: '点击穿透', false: '可交互' },
+          {
+            true: '鼠标点不到她，点击会落到后面的窗口。',
+            false: '她可以接收点击 —— 打开后才能拖文件给她。'
+          },
+          (value) => update({ clickThrough: value === 'true' })
+        )
+
+        fillVoices(document.getElementById('voice'), state.voice)
+        fillVoices(document.getElementById('voiceJa'), state.voiceJa)
+        fillVoices(document.getElementById('voiceZh'), state.voiceZh)
+        fillVoices(document.getElementById('voiceEn'), state.voiceEn)
+      }
+
+      function update(patch) {
+        state = { ...state, ...patch }
+        invoke('save_shell_settings', { settings: state }).then((result) => {
+          state = result.settings
+          // Re-render the fields the shell may have normalized.
+          render()
+          status.textContent = '已保存'
+          status.className = 'saved'
+          clearTimeout(update.timer)
+          update.timer = setTimeout(() => {
+            status.textContent = ''
+            status.className = ''
+          }, 1600)
+        })
+      }
+
+      for (const id of ['voice', 'voiceJa', 'voiceZh', 'voiceEn']) {
+        document.getElementById(id).addEventListener('change', (event) => {
+          const key = { voice: 'voice', voiceJa: 'voiceJa', voiceZh: 'voiceZh', voiceEn: 'voiceEn' }[id]
+          update({ [key]: event.target.value })
+        })
+      }
+
+      invoke('shell_settings').then((result) => {
+        state = result.settings
+        options = result.options
+        render()
+      })
+    </script>
+  </body>
+</html>

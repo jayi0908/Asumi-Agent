@@ -58,6 +58,7 @@ DSH engine (Node, Cordis)
 asumi-plugins/           DSH bundle（能力都在这里）
   asumi-persona/         人设：系统提示词 section + {{asumi_name}} 变量
   asumi-desktop/         桌面桥：asumi_speak / asumi_look / asumi_presence
+  asumi-fallback/        主模型不可用时回退到备用 route
 scripts/
   build-engine.mjs       组装打包用的引擎树（src-tauri/engine）
   fetch-node.mjs         取 Node 运行时当 sidecar（src-tauri/binaries）
@@ -68,12 +69,15 @@ src-tauri/
   src/engine.rs          启动 / 预置 profile / 关停引擎
   src/dsh.rs             引擎 URL 持有与 webview 导航
   src/bridge.rs          桌面桥客户端、截图、base64、端口分配
-  src/pet.rs             桌宠窗口与存在模式
+  src/pet.rs             桌宠窗口、存在模式、出现模组
+  src/prefs.rs           设置窗口 + 两个命令
+  src/settings.rs        壳侧设置（读写 app config 下的 JSON）
   src/quick.rs           ⌘E 快捷助手窗口
-  src/tray.rs            菜单栏
+  src/tray.rs            菜单栏 + 应用菜单
   src/voice.rs           TTS
-  pet/index.html         桌宠页面（透明，file:// 加载）
-  loading/index.html     启动页（frontendDist）
+  ui/index.html          启动页（frontendDist 根）
+  ui/pet/index.html      桌宠页面（+ asumi.png）
+  ui/settings/index.html 设置页面
   tauri.bundle.conf.json 打包用配置叠加层（见下）
 docs/reference/          Cherry Studio 移植资料（代码不在本分支）
 ```
@@ -116,6 +120,40 @@ node scripts/configure-asumi-model.mjs --modalities text,image
 本机当前：`http://os-cw-pc:9001/v1`（sglang）+ `Qwen3.8-27B-Uncensored-FP8`。
 注意该端点的模型 id 用的是 U+2011 连字符，两种写法服务端都接受。
 
+## 模型回退
+
+主模型是自建的（本机/局域网的 sglang 之类），它不在时整轮对话会失败。内置重试帮不上
+忙：它重试的是同一个 endpoint，而 agent loop 在**组装 prompt 时**就定下了这一步的 route
+——`agent/pre-step` 在组装**之后**才触发，所以一轮进行中改选择只对**下一轮**生效。
+
+因此回退的判断放在「没有请求在飞」的时候（`asumi-fallback` bundle）：
+
+| 时机 | 行为 |
+|---|---|
+| 会话开始（`agent/session-start`） | 探测主 route，不可达则把该会话切到备用 route |
+| 定时器（默认 30s） | 复查主 route，状态变化的会话跟着切 |
+| 每步（`agent/pre-step`） | 便宜的二次检查（探测结果有缓存） |
+| 请求失败（`agent/request-error`） | 兜底：让**下一个**请求走备用 route |
+
+探测就是 `GET <baseURL>/models`（pi-ai 自己发现模型用的那个 URL），2s 超时；**能应答
+就算可达**（401/403 说明服务活着）。endpoint 从设置文档里按 route 的
+`settingsNs` + `settingsPath` 读，所以手写 gateway 和目录 route 都适用。
+
+两条不变量：
+
+- **只动会话，不动默认模型**：切换走的是会话级选择，用户的 `agent-default-model`
+  保持原样，因此主模型恢复后能精确切回原来那个模型（上面实测日志里的
+  `returning to qwen3-8/Qwen3.8-27B-Uncensored-FP8`），新会话也仍然从主模型开始。
+- **手动选择优先**：只有在主 route 不可达时才切走，且只切回自己切过的会话。
+
+实测（主 endpoint 真的关着）：
+
+```
+qwen3-8 is unreachable; using deepseek-official/deepseek-flash   ← 回合还没开始
+（该回合在 DeepSeek 上 1 秒完成，没有 8 秒的无效重试）
+qwen3-8 is back; returning to qwen3-8/Qwen3.8-27B-Uncensored-FP8
+```
+
 ## 桌面桥
 
 ```
@@ -143,22 +181,56 @@ pi-ai 适配器会把 tool-result 里的图片投影成 `image` content part，�
 返回 0 但只拿到桌面背景，Rust 以 `ok:false` 回写，让あすみ告诉先輩而不是描述一张
 空画面。
 
-## 桌宠与存在模式
+## 桌宠：存在方式 × 出现模组
 
-桌宠窗口 `pet`：透明、置顶、跳过任务栏、点击穿透，默认停在主屏右下角。
-存在模式由桥命令 `pet-mode` 驱动，也是 `asumi_presence` 工具的实现：
+桌宠窗口 `pet`：透明、置顶、跳过任务栏、默认点击穿透，停靠在主屏工作区的角落。
+两个正交的设置驱动它：
 
-| 模式 | 行为 |
-|---|---|
-| `always`（常驻） | 一直显示 |
-| `ghost`（透明） | 窗口保留但全透明，只在开口时淡入、约 9s 后淡出 |
-| `hidden` | 窗口直接 hide |
+| 设置 | 取值 | 含义 |
+|---|---|---|
+| **存在方式** | `always` / `ghost` / `hidden` | 在不在屏幕上；`ghost` 时说完话会收回 |
+| **出现模组** | `fade` / `peek-bottom` / `peek-top` | 登场与退场的方式，以及停在哪个角 |
 
-淡入淡出由页面 CSS（`body[data-mode]` + `.ghost-active`）完成，Rust 只负责可见性与
-模式状态。菜单栏（`tray.rs`）也能切这三种模式。
+```
+ghost + fade        ── 原地淡入淡出
+ghost + peek-bottom ── 从右下角探头，说完收回
+ghost + peek-top    ── 从右上角探头，说完收回
+always              ── 一直可见，模组不参与
+```
 
-TTS 按文本书写系统选语音（假名→ja/`Kyoko`，汉字→zh/`Tingting`，其余→en/`Samantha`），
-可用 `ASUMI_TTS_VOICE{,_JA,_ZH,_EN}` 覆盖；语音不在本机时回退到系统默认。
+**窗口不动，动的是内容**：Rust 只负责停靠位置（探头模组决定是右下还是右上，用
+`monitor.work_area()` 避开菜单栏与 Dock），动画由页面 CSS 用
+`body[data-presence][data-appearance]` 与 `.asumi-active` 做 transform / opacity。
+这样「探头」是一次合成动画，而不是逐帧移动窗口。
+
+**时序**：浮现 → 开口 → 停留 **5s** → 收回。计时器在页面里，连续说话会**重置**而不是
+中途收回。
+
+设置存储在 `~/Library/Application Support/com.asumi.agent/shell-settings.json`，
+托盘、桌宠、设置窗口共用同一份。
+
+菜单栏图标是原版的雪花（`icons/menubar-22.png`）。macOS 不会给非 template 图片自动
+反色，所以按系统深浅色**重绘**它：浅色菜单栏用黑色，深色用白色（只改 RGB，保留
+alpha，抗锯齿边缘两种背景都成立），并监听 `ThemeChanged` 实时换图。
+
+## 设置窗口
+
+`prefs.rs` 提供一个静态页设置窗口（无前端构建，和桌宠页同构），入口是托盘「设置…」
+与应用菜单的 `⌘,`。它**只放桌面侧的设置**：出现模组、存在方式、语音、点击穿透。
+模型、人格、Skill 属于引擎，留在引擎自己的 UI 里，两边不重复。
+
+两个实现细节值得记下来：
+
+- 页面通过 `initialization_script` 注入的 `window.asumi.invoke` 调命令，而**不是**
+  `withGlobalTauri`——引擎的 web client 是普通网页，不该被塞进 Tauri 的全局 API。
+- 页面必须以**本应用的 origin** 加载（`WebViewUrl::App`）。`file://` 在 IPC 层算
+  「远程来源」，自定义命令会被拒绝；这也是 `pet`/`settings` 页面从 `file://` +
+  bundle resource 改成 `frontendDist` 下静态资源的原因（早期用仓库路径拼接的写法
+  在别人的机器上必然失败——编译期路径是开发机的）。
+
+TTS 语音现在也是设置项：环境变量只在首次运行时**播种**默认值
+（`ASUMI_TTS_VOICE`、`ASUMI_TTS_VOICE_JA/_ZH/_EN`），之后以设置为准，用户存下的选择
+不会被环境变量悄悄覆盖。
 
 ## 快捷呼出
 
@@ -277,6 +349,9 @@ DSH 的空会话要求先选一个工作区（「添加工作区」走原生目�
 | 端口 | ✅ 动态分配（实测 web :61834 / bridge :61831），不撞残留进程 |
 | 关停 | ✅ `SIGTERM` → `signal 15; stopping the engine` → 引擎一并退出 |
 | 模型路由 | ✅ 默认模型显示 `Qwen3.8-27B-Uncensored-FP8` |
+| 设置窗口 | ✅ 打开即读到配置（`settings page asked for its configuration`），往返保存生效 |
+| 出现模组 | ✅ 三种模组实测：fade 0↔1、peek 上下 881px↔0、`always` 时模组不参与；停留 5s 且重复说话会续时 |
+| 菜单栏图标 | ✅ 深色主题下渲染为白色雪花 |
 | 工具链路 | ✅ 打包版实测 `pet-mode → always`、`speak → voice Kyoko`、`capture-screen 3420x2224` |
 
 ## 已知事项
@@ -285,6 +360,10 @@ DSH 的空会话要求先选一个工作区（「添加工作区」走原生目�
   并注意 `schemastery` / `cordis` 的版本要与引擎树一致。
 - **未做公证**：ad-hoc 签名已启用（bundle 自洽），但没有 Apple Developer 会员就无法
   公证，首次打开仍要清隔离属性。见上文「签名与公证」。
+- 回退是**事前**判断：如果在探测间隔内主模型刚好挂掉，那一轮仍会失败（下一轮开始走
+  备用 route）。回合进行中无法救援——这是 agent loop 决定 route 的时机决定的。
+- `asumi-fallback` 通过 `sessionController.agents.selectForNextRequest` 做**会话级**
+  选择（不写默认模型）。这是内部 API，DSH 升级后需要重新确认；缺失时插件会明确报错。
 - 重新组装引擎要 4 分钟（完整 `pnpm install`）；`build-engine.mjs` 在
   `src-tauri/engine` 已是当前版本时会跳过，CI 用 cache 缓存该目录。
 - 音频播放（`playAudio` / 桥命令 `audio`）按计划跳过，桥里仍是占位日志。

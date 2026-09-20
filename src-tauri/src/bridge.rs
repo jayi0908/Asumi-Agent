@@ -113,7 +113,7 @@ fn handle(app: &AppHandle, message: &Value) {
                 .get("mode")
                 .and_then(|v| v.as_str())
                 .unwrap_or("always");
-            pet::set_mode(app, mode);
+            pet::set_presence(app, mode);
         }
         "notify" => {
             let title = message

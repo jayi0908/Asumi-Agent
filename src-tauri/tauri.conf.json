@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.asumi.agent",
   "build": {
-    "frontendDist": "./loading"
+    "frontendDist": "./ui"
   },
   "app": {
     "macOSPrivateApi": true,

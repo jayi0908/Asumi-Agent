@@ -1,37 +1,40 @@
 //! The transparent pet window.
 //!
-//! Asumi's presence on the desktop: an undecorated, always-on-top, click-through
-//! window parked in the corner of the primary monitor. The shell drives it by
-//! calling the page's JS hooks, so the page owns appearance and the shell owns
-//! lifetime and visibility.
+//! Asumi's presence on the desktop: an undecorated, always-on-top window parked
+//! in a corner of the primary monitor. Two orthogonal settings drive it:
+//!
+//! * **presence** (`always` / `ghost` / `hidden`) decides whether she is on
+//!   screen at all, and whether she leaves between utterances;
+//! * **appearance** (`fade` / `peek-bottom` / `peek-top`) decides how she
+//!   arrives and leaves, and which corner she lives in.
+//!
+//! The shell owns the window's position and visibility; the page owns the
+//! animation, so a peek is a CSS transform rather than a window being moved
+//! frame by frame.
 
 use std::sync::Mutex;
 
-use serde_json::json;
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
-use crate::dsh;
+use crate::settings;
 
 /// Window label of the pet.
 pub const LABEL: &str = "pet";
 
 const WIDTH: f64 = 220.0;
 const HEIGHT: f64 = 320.0;
-const MARGIN: f64 = 24.0;
+const MARGIN: f64 = 18.0;
 
-/// Pet presence mode: `always` (常驻), `ghost` (透明), or `hidden`.
-///
-/// `always` keeps Asumi on screen. `ghost` keeps the window mapped but fully
-/// transparent until she speaks, then fades her back out. `hidden` takes the
-/// window off screen entirely.
-static MODE: Mutex<Option<String>> = Mutex::new(None);
+/// The presence mode last applied to the window.
+static PRESENCE: Mutex<Option<String>> = Mutex::new(None);
 
-/// The current presence mode, defaulting to 常驻.
-pub fn current_mode() -> String {
-    MODE.lock()
+/// The presence mode in force, defaulting to 常駐.
+pub fn presence() -> String {
+    PRESENCE
+        .lock()
         .ok()
         .and_then(|guard| guard.clone())
-        .unwrap_or_else(|| "always".to_string())
+        .unwrap_or_else(|| settings::ShellSettings::default().presence)
 }
 
 /// Create the pet window if it does not exist yet.
@@ -40,13 +43,20 @@ pub fn ensure(app: &AppHandle) {
         return;
     }
 
-    let page = dsh::repo_root().join("src-tauri").join("pet").join("index.html");
-    let Ok(url) = tauri::Url::from_file_path(&page) else {
-        eprintln!("[asumi] pet page path invalid: {}", page.display());
-        return;
-    };
+    let current = settings::get();
+    // Hand the page its initial state before it renders, so no setter can race
+    // the page's own scripts.
+    let init = format!(
+        "window.__ASUMI_INIT = {};",
+        serde_json::json!({
+            "presence": current.presence,
+            "appearance": current.appearance,
+        })
+    );
 
-    match WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(url))
+    // Served from the app's own origin, so the page is "local" to the IPC
+    // layer and can use the injected bridge without an ACL grant.
+    match WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("pet/index.html".into()))
         .title("Asumi")
         .inner_size(WIDTH, HEIGHT)
         .decorations(false)
@@ -55,29 +65,46 @@ pub fn ensure(app: &AppHandle) {
         .skip_taskbar(true)
         .resizable(false)
         .shadow(false)
+        .initialization_script(&init)
         .build()
     {
         Ok(window) => {
-            // The pet is decoration, not a hit target.
-            let _ = window.set_ignore_cursor_events(true);
-            park_bottom_right(app, &window);
+            let _ = window.set_ignore_cursor_events(current.click_through);
+            park(app);
+            apply_presence(app, &current.presence);
             eprintln!("[asumi] pet window created");
         }
         Err(error) => eprintln!("[asumi] pet window failed: {error}"),
     }
 }
 
-/// Park the window near the bottom-right of the primary monitor.
-fn park_bottom_right(app: &AppHandle, window: &tauri::WebviewWindow) {
+/// Park the window in the corner the appearance module uses.
+///
+/// The work area excludes the menu bar and the Dock, which matters for the
+/// top-right module: a window placed at the raw screen origin would sit under
+/// the menu bar.
+fn park(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(LABEL) else {
+        return;
+    };
     let Ok(Some(monitor)) = app.primary_monitor() else {
         return;
     };
+
     let scale = monitor.scale_factor();
-    let screen = monitor.size();
+    let area = monitor.work_area();
+    let width = WIDTH * scale;
+    let height = HEIGHT * scale;
     let margin = MARGIN * scale;
-    let x = screen.width as f64 - WIDTH * scale - margin;
-    let y = screen.height as f64 - HEIGHT * scale - margin;
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+
+    let x = area.position.x as f64 + area.size.width as f64 - width - margin;
+    let y = if settings::get().appearance == "peek-top" {
+        area.position.y as f64 + margin
+    } else {
+        area.position.y as f64 + area.size.height as f64 - height - margin
+    };
+
+    let _ = window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
 }
 
 /// Call a JS hook on the pet page, ignoring an absent window.
@@ -92,6 +119,77 @@ fn literal(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+/// Apply the presence mode to the window.
+pub fn apply_presence(app: &AppHandle, mode: &str) {
+    let mode = match mode {
+        "ghost" => "ghost",
+        "hidden" => "hidden",
+        _ => "always",
+    };
+    if let Ok(mut guard) = PRESENCE.lock() {
+        *guard = Some(mode.to_string());
+    }
+
+    eval(
+        app,
+        &format!(
+            "window.__asumiSetPresence && window.__asumiSetPresence({})",
+            literal(mode)
+        ),
+    );
+
+    if let Some(pet) = app.get_webview_window(LABEL) {
+        match mode {
+            "hidden" => {
+                let _ = pet.hide();
+            }
+            // Ghost stays mapped but invisible: the page keeps it that way and
+            // reveals it on speech, which cannot happen while hidden.
+            _ => {
+                let _ = pet.show();
+            }
+        }
+    }
+    eprintln!("[asumi] presence -> {mode}");
+}
+
+/// Switch presence mode and remember it.
+pub fn set_presence(app: &AppHandle, mode: &str) {
+    let mut next = settings::get();
+    next.presence = mode.to_string();
+    let saved = settings::put(app, next);
+    apply_presence(app, &saved.presence);
+    crate::tray::refresh(app);
+}
+
+/// Apply the appearance module: re-park and tell the page how to animate.
+pub fn apply_appearance(app: &AppHandle, module: &str) {
+    eval(
+        app,
+        &format!(
+            "window.__asumiSetAppearance && window.__asumiSetAppearance({})",
+            literal(module)
+        ),
+    );
+    park(app);
+}
+
+/// Switch appearance module and remember it.
+pub fn set_appearance(app: &AppHandle, module: &str) {
+    let mut next = settings::get();
+    next.appearance = module.to_string();
+    let saved = settings::put(app, next);
+    apply_appearance(app, &saved.appearance);
+    crate::tray::refresh(app);
+}
+
+/// Apply the click-through preference.
+pub fn apply_click_through(app: &AppHandle, enabled: bool) {
+    if let Some(pet) = app.get_webview_window(LABEL) {
+        let _ = pet.set_ignore_cursor_events(enabled);
+    }
+}
+
 /// Update the pet's mood.
 pub fn set_state(app: &AppHandle, state: &str) {
     reveal(app);
@@ -104,55 +202,18 @@ pub fn set_state(app: &AppHandle, state: &str) {
     );
 }
 
-/// Show a speech bubble and reveal the pet in ghost mode.
+/// Show a speech bubble, revealing the pet when she is in ghost mode.
 pub fn say(app: &AppHandle, text: &str) {
     reveal(app);
     eval(
         app,
-        &format!(
-            "window.__asumiSay && window.__asumiSay({})",
-            literal(text)
-        ),
+        &format!("window.__asumiSay && window.__asumiSay({})", literal(text)),
     );
 }
 
-/// Switch presence mode.
-pub fn set_mode(app: &AppHandle, mode: &str) {
-    let mode = match mode {
-        "ghost" | "transparent" => "ghost",
-        "hidden" | "off" => "hidden",
-        _ => "always",
-    };
-    if let Ok(mut guard) = MODE.lock() {
-        *guard = Some(mode.to_string());
-    }
-
-    eval(
-        app,
-        &format!(
-            "window.__asumiSetMode && window.__asumiSetMode({})",
-            literal(mode)
-        ),
-    );
-
-    if let Some(pet) = app.get_webview_window(LABEL) {
-        match mode {
-            "hidden" => {
-                let _ = pet.hide();
-            }
-            // Ghost mode starts transparent and is revealed by speech, so the
-            // window stays mapped while the page keeps it invisible.
-            _ => {
-                let _ = pet.show();
-            }
-        }
-    }
-    eprintln!("[asumi] pet mode -> {mode}");
-}
-
-/// Bring the pet forward for one utterance, fading it back in ghost mode.
+/// Bring the pet on screen for one utterance.
 pub fn reveal(app: &AppHandle) {
-    if current_mode() != "ghost" {
+    if presence() != "ghost" {
         return;
     }
     if let Some(pet) = app.get_webview_window(LABEL) {
@@ -161,23 +222,9 @@ pub fn reveal(app: &AppHandle) {
     eval(app, "window.__asumiReveal && window.__asumiReveal()");
 }
 
-/// Whether the pet window is currently visible to the user.
+/// Whether the pet window is currently mapped.
 pub fn visible(app: &AppHandle) -> bool {
     app.get_webview_window(LABEL)
         .and_then(|pet| pet.is_visible().ok())
         .unwrap_or(false)
-}
-
-/// Toggle between the last visible presence and hidden.
-pub fn toggle_hidden(app: &AppHandle) {
-    if visible(app) {
-        set_mode(app, "hidden");
-    } else {
-        set_mode(app, "always");
-    }
-}
-
-/// A JSON snapshot of the pet state, for logging and the tray.
-pub fn state_snapshot(app: &AppHandle) -> serde_json::Value {
-    json!({ "mode": current_mode(), "visible": visible(app) })
 }

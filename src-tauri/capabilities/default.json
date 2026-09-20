@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The shell drives its windows and the engine bridge from Rust; the webviews only render the DSH web client, so they need no plugin permissions of their own.",
-  "windows": ["main", "quickAssistant", "pet"],
+  "description": "The shell drives its windows and the engine bridge from Rust; the webviews render the engine's UI, and the settings page reaches the shell through an injected bridge, so no plugin permissions are needed.",
+  "windows": ["main", "quickAssistant", "pet", "settings"],
   "permissions": ["core:default"]
 }
