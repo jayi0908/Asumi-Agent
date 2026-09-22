@@ -71,6 +71,7 @@ src-tauri/
   src/bridge.rs          桌面桥客户端、截图、base64、端口分配
   src/pet.rs             桌宠窗口、存在模式、出现模组
   src/prefs.rs           设置窗口 + 两个命令
+  src/tts.rs             语音服务：懒启动、探测、合成、播放
   src/settings.rs        壳侧设置（读写 app config 下的 JSON）
   src/quick.rs           ⌘E 快捷助手窗口
   src/tray.rs            菜单栏 + 应用菜单
@@ -213,6 +214,48 @@ always              ── 一直可见，模组不参与
 反色，所以按系统深浅色**重绘**它：浅色菜单栏用黑色，深色用白色（只改 RGB，保留
 alpha，抗锯齿边缘两种背景都成立），并监听 `ThemeChanged` 实时换图。
 
+## 语音
+
+声音是**单独一个仓库**里的本地服务（模型权重 ~240MB + torch 环境，不可能随包），
+用户在设置里指定仓库路径、服务地址、Python 路径，以及是否懒启动（默认开）。
+
+```
+asumi_say(ja, zh)            ← 模型一次给出两个字段
+      │
+      ├─ ja ──► 服务 /tts ──► WAV ──► afplay    （只朗读日语）
+      └─ ja + zh ──► 桌宠气泡：「中文」/「日语」  （两个字段一起展示）
+```
+
+**为什么是两个字段而不是一句话**：模型只能读日语，所以"这段文本是什么语言"必须是接口的
+事实，而不是让壳去猜。结构化的字段比 persona 里的措辞要求可靠得多 —— 之前模型会把中文
+混进日语行，现在它填错字段是显式的。中文由模型自己翻译（它就刚说完那句日语）。
+
+| 规则 | 行为 |
+|---|---|
+| 只朗读 `ja` | `zh` 只是字幕；`ja` 一字不改送去合成（不做分句手术，保留模型自己的标点与停顿） |
+| `ja` 无假名 | 拒绝发声并记日志（说明它其实是中文/英文，日语前端会读错，不如不说） |
+| 服务无应答 | **静默**：不播放、也不换其他嗓音 |
+| 应答不是 WAV | 同样静默（校验 RIFF/WAVE 头，不靠 HTTP 状态码） |
+| 连续说话 | 新的一句会掐掉还在播的上一句 |
+
+语音服务契约（`${ttsUrl}`）：
+
+| 接口 | 用途 |
+|---|---|
+| `GET /health` | 就绪探测（2s 超时） |
+| `POST /tts` `{text, length}` | 返回 `audio/wav` |
+
+懒启动：第一次说日语时用 `{python} -m uvicorn asumi_tts.server:app --port <URL 里的端口>`
+在仓库目录下拉起服务，之后常驻，随 app 退出结束。
+
+> **服务侧的一个坑（已踩过）**：Style-Bert-VITS2 的 `TTSModel.infer()` 按设计返回
+> **int16 量级**的数组（`convert_to_16_bit_wav` 归一化后 `astype(int16)`）。官方
+> `server_fastapi.py` 直接把这个 int16 数组交给 `scipy.wavfile.write`，所以没问题；
+> 而 `asumi_tts/engine.py` 曾把它转成 float32（值域 ±32767）再交给 `soundfile` 写
+> `PCM_16` —— soundfile 期望 float 在 ±1，于是 **91% 的采样被铲平**，听感就是"炸麦 +
+> 沙沙声"。修法是在 `engine.py` 里按 config 的 `max_wav_value` 缩到 ±1（权重不动，
+> 只是标度）。判据：`rms≈0.95`、`clipped≈90%` 就是它；正常应 `rms≈0.13`、`clipped≈0%`。
+
 ## 设置窗口
 
 `prefs.rs` 提供一个静态页设置窗口（无前端构建，和桌宠页同构），入口是托盘「设置…」
@@ -352,6 +395,9 @@ DSH 的空会话要求先选一个工作区（「添加工作区」走原生目�
 | 设置窗口 | ✅ 打开即读到配置（`settings page asked for its configuration`），往返保存生效 |
 | 出现模组 | ✅ 三种模组实测：fade 0↔1、peek 上下 881px↔0、`always` 时模组不参与；停留 5s 且重复说话会续时 |
 | 菜单栏图标 | ✅ 深色主题下渲染为白色雪花 |
+| 语音（`asumi_say`） | ✅ 只把 `ja` 送去合成、`zh` 只作字幕；气泡按「中文」/「日语」两行显示 |
+| 语音失败静默 | ✅ 服务未应答时不发声（日志 `is not answering; staying silent`），不切换其他嗓音 |
+| 语音懒启动 | ✅ 首次说日语时拉起服务，就绪后常驻；应用侧收到并播放的音频 `clipped=0.00%` |
 | 工具链路 | ✅ 打包版实测 `pet-mode → always`、`speak → voice Kyoko`、`capture-screen 3420x2224` |
 
 ## 已知事项

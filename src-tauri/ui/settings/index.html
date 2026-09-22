@@ -131,6 +131,8 @@
         color: var(--muted);
       }
 
+      input[type="text"],
+      input[type="number"],
       select {
         min-width: 190px;
         padding: 4px 6px;
@@ -139,6 +141,12 @@
         background: var(--bg);
         color: var(--text);
         font: inherit;
+      }
+
+      .note {
+        margin: 10px 0 2px;
+        color: var(--muted);
+        font-size: 11.5px;
       }
 
       footer {
@@ -176,7 +184,31 @@
 
       <section>
         <h2>语音</h2>
-        <p>留空表示按文本语言自动选择。改动在下一句话生效。</p>
+        <p>
+          あすみ 只说日语：台词里的日语行会被朗读，中文行不发声。模型是单独仓库里的
+          本地服务，这里指定它在哪；服务没应答就不出声，不会切换到别的嗓音。
+        </p>
+        <div class="options" id="voiceBackend"></div>
+
+        <div class="field">
+          <span>语音仓库</span>
+          <input id="ttsRepo" type="text" placeholder="/path/to/Asumi-TTS" />
+        </div>
+        <div class="field">
+          <span>服务地址</span>
+          <input id="ttsUrl" type="text" placeholder="http://127.0.0.1:8077" />
+        </div>
+        <div class="field">
+          <span>Python 路径</span>
+          <input id="ttsPython" type="text" placeholder="python3" />
+        </div>
+        <div class="field">
+          <span>语速</span>
+          <input id="ttsLength" type="number" step="0.05" min="0.5" max="2" />
+        </div>
+        <div class="options" id="ttsLazyStart"></div>
+
+        <p class="note">系统语音（后端选「系统语音」时使用；留空表示按文本语言自动选）</p>
         <div class="field">
           <span>统一使用</span>
           <select id="voice"></select>
@@ -222,6 +254,16 @@
         fade: '淡入淡出',
         'peek-bottom': '右下角探头',
         'peek-top': '右上角探头'
+      }
+
+      const VOICE_BACKEND_NAMES = {
+        asumi: '亜澄模型',
+        system: '系统语音'
+      }
+
+      const VOICE_BACKEND_HINTS = {
+        asumi: '台词里的日语行交给训练好的声音朗读。',
+        system: '用 macOS 自带嗓音朗读所有语言。'
       }
 
       const PRESENCE_NAMES = {
@@ -318,10 +360,42 @@
           (value) => update({ clickThrough: value === 'true' })
         )
 
+        radioGroup(
+          document.getElementById('voiceBackend'),
+          options.voiceBackends,
+          state.voiceBackend,
+          VOICE_BACKEND_NAMES,
+          VOICE_BACKEND_HINTS,
+          (value) => update({ voiceBackend: value })
+        )
+        radioGroup(
+          document.getElementById('ttsLazyStart'),
+          ['true', 'false'],
+          String(state.ttsLazyStart),
+          { true: '懒启动', false: '手动启动' },
+          {
+            true: '第一次说日语时自动把服务拉起来（首次要等模型加载）。',
+            false: '服务由你自己启动，应用只负责连接。'
+          },
+          (value) => update({ ttsLazyStart: value === 'true' })
+        )
+
+        setValue('ttsRepo', state.ttsRepo)
+        setValue('ttsUrl', state.ttsUrl)
+        setValue('ttsPython', state.ttsPython)
+        setValue('ttsLength', state.ttsLength)
+
         fillVoices(document.getElementById('voice'), state.voice)
         fillVoices(document.getElementById('voiceJa'), state.voiceJa)
         fillVoices(document.getElementById('voiceZh'), state.voiceZh)
         fillVoices(document.getElementById('voiceEn'), state.voiceEn)
+      }
+
+      /** Write a value into a field without clobbering what is being typed. */
+      function setValue(id, value) {
+        const element = document.getElementById(id)
+        if (document.activeElement === element) return
+        element.value = value ?? ''
       }
 
       function update(patch) {
@@ -342,10 +416,24 @@
 
       for (const id of ['voice', 'voiceJa', 'voiceZh', 'voiceEn']) {
         document.getElementById(id).addEventListener('change', (event) => {
-          const key = { voice: 'voice', voiceJa: 'voiceJa', voiceZh: 'voiceZh', voiceEn: 'voiceEn' }[id]
-          update({ [key]: event.target.value })
+          update({ [id]: event.target.value })
         })
       }
+
+      for (const [id, key] of [
+        ['ttsRepo', 'ttsRepo'],
+        ['ttsUrl', 'ttsUrl'],
+        ['ttsPython', 'ttsPython']
+      ]) {
+        document.getElementById(id).addEventListener('change', (event) => {
+          update({ [key]: event.target.value.trim() })
+        })
+      }
+
+      document.getElementById('ttsLength').addEventListener('change', (event) => {
+        const value = Number.parseFloat(event.target.value)
+        update({ ttsLength: Number.isFinite(value) ? value : 1.0 })
+      })
 
       invoke('shell_settings').then((result) => {
         state = result.settings

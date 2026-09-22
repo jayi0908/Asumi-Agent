@@ -21,6 +21,9 @@ pub const APPEARANCES: [&str; 3] = ["fade", "peek-bottom", "peek-top"];
 /// Whether and how long Asumi stays on screen.
 pub const PRESENCES: [&str; 3] = ["always", "ghost", "hidden"];
 
+/// Which engine voices Asumi.
+pub const VOICE_BACKENDS: [&str; 2] = ["asumi", "system"];
+
 const FILE: &str = "shell-settings.json";
 
 /// Persisted shell settings.
@@ -42,6 +45,18 @@ pub struct ShellSettings {
     /// When true the pet ignores the pointer, so clicks pass through to
     /// whatever is behind her.
     pub click_through: bool,
+    /// Voice backend: `asumi` (the cloned voice service) or `system` (`say`).
+    pub voice_backend: String,
+    /// Where the Asumi-TTS repository lives. Empty means "do not launch".
+    pub tts_repo: String,
+    /// Base URL of the voice service.
+    pub tts_url: String,
+    /// Start the service on first use instead of requiring it to be running.
+    pub tts_lazy_start: bool,
+    /// Interpreter used to start the service.
+    pub tts_python: String,
+    /// Speech rate: the service's `length`, where >1 is slower.
+    pub tts_length: f64,
 }
 
 impl Default for ShellSettings {
@@ -54,6 +69,12 @@ impl Default for ShellSettings {
             voice_zh: crate::voice::default_voice("zh"),
             voice_en: crate::voice::default_voice("en"),
             click_through: true,
+            voice_backend: "asumi".to_string(),
+            tts_repo: String::new(),
+            tts_url: "http://127.0.0.1:8077".to_string(),
+            tts_lazy_start: true,
+            tts_python: "python3".to_string(),
+            tts_length: 1.0,
         }
     }
 }
@@ -68,6 +89,12 @@ impl ShellSettings {
         if !PRESENCES.contains(&self.presence.as_str()) {
             self.presence = ShellSettings::default().presence;
         }
+        if !VOICE_BACKENDS.contains(&self.voice_backend.as_str()) {
+            self.voice_backend = ShellSettings::default().voice_backend;
+        }
+        // A rate outside this range is a hand-edit mistake; clamp rather than
+        // let it reach the model.
+        self.tts_length = self.tts_length.clamp(0.5, 2.0);
         self
     }
 }

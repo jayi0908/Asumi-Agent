@@ -11,7 +11,7 @@
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use crate::settings::{self, ShellSettings, APPEARANCES, PRESENCES};
+use crate::settings::{self, ShellSettings, APPEARANCES, PRESENCES, VOICE_BACKENDS};
 use crate::{pet, tray, voice};
 
 /// Window label of the settings window.
@@ -59,6 +59,7 @@ pub fn shell_settings() -> Value {
         "options": {
             "presences": PRESENCES,
             "appearances": APPEARANCES,
+            "voiceBackends": VOICE_BACKENDS,
             "voices": voice::selectable(),
         },
     })
@@ -72,6 +73,7 @@ pub fn save_shell_settings(app: AppHandle, settings: ShellSettings) -> Value {
     pet::apply_presence(&app, &saved.presence);
     pet::apply_appearance(&app, &saved.appearance);
     pet::apply_click_through(&app, saved.click_through);
+    // Voice settings are read at each utterance, so nothing to apply here.
     tray::refresh(&app);
 
     json!({ "settings": saved })

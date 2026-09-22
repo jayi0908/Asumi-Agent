@@ -202,6 +202,25 @@ pub fn set_state(app: &AppHandle, state: &str) {
     );
 }
 
+/// Show a speech bubble with one bilingual line, revealing the pet in ghost mode.
+///
+/// `zh` is the subtitle and `ja` is what the voice reads; both are shown, in
+/// that order, the way the character's lines are presented in the source
+/// material. An empty half is simply omitted.
+pub fn say_pair(app: &AppHandle, zh: &str, ja: &str) {
+    let mut lines: Vec<String> = Vec::new();
+    if !zh.trim().is_empty() {
+        lines.push(format!("「{}」", zh.trim()));
+    }
+    if !ja.trim().is_empty() {
+        lines.push(format!("「{}」", ja.trim()));
+    }
+    if lines.is_empty() {
+        return;
+    }
+    say(app, &lines.join("\n"));
+}
+
 /// Show a speech bubble, revealing the pet when she is in ghost mode.
 pub fn say(app: &AppHandle, text: &str) {
     reveal(app);

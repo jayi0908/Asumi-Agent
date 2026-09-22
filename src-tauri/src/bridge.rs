@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
-use crate::{pet, voice};
+use crate::{pet, tts};
 
 const DEFAULT_PORT: u16 = 3099;
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
@@ -93,13 +93,21 @@ fn handle(app: &AppHandle, message: &Value) {
     let kind = message.get("type").and_then(|v| v.as_str()).unwrap_or("");
     eprintln!("[asumi] desktop <- {kind}");
     match kind {
-        "speak" => {
-            let text = message.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            if text.is_empty() {
+        "say" => {
+            let ja = message.get("ja").and_then(|v| v.as_str()).unwrap_or("");
+            let zh = message.get("zh").and_then(|v| v.as_str()).unwrap_or("");
+            if ja.trim().is_empty() && zh.trim().is_empty() {
                 return;
             }
-            pet::say(app, text);
-            voice::speak(text);
+            pet::say_pair(app, zh, ja);
+            // Only the Japanese half is voiced; the Chinese half is the
+            // subtitle. Synthesis may block while the model loads, so it does
+            // not run on the bridge's reader thread.
+            if !ja.trim().is_empty() {
+                let handle = app.clone();
+                let spoken = ja.to_string();
+                std::thread::spawn(move || tts::speak(&handle, &spoken));
+            }
         }
         "pet-state" => {
             let state = message

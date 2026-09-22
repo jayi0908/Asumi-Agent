@@ -18,6 +18,7 @@ pub mod prefs;
 pub mod quick;
 pub mod settings;
 pub mod tray;
+pub mod tts;
 pub mod voice;
 
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -87,6 +88,7 @@ pub fn run() {
         .run(|_app, event| {
             if let RunEvent::Exit = event {
                 engine::shutdown();
+                tts::shutdown();
             }
         });
 }

@@ -88,6 +88,9 @@
         font-size: 12px;
         line-height: 1.45;
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+        /* A bilingual line arrives with a newline between the subtitle and the
+           spoken line; without this, HTML collapses it into one run-on row. */
+        white-space: pre-line;
         opacity: 0;
         transition:
           opacity 0.22s ease,

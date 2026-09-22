@@ -156,9 +156,15 @@ export function apply(ctx) {
       super(parent, 'asumiDesktop')
     }
 
-    /** Ask the desktop to speak `text`, optionally with an emotion. */
-    speak(text, options = {}) {
-      return bridge.send({ type: 'speak', text, ...options })
+    /**
+     * Say one bilingual line: `ja` is voiced, and both halves are displayed.
+     *
+     * Two fields rather than one line of mixed prose: the voice model is
+     * Japanese-only, so the language of its input has to be a fact of the
+     * interface instead of something the shell guesses at.
+     */
+    say(ja, zh, options = {}) {
+      return bridge.send({ type: 'say', ja, zh, ...options })
     }
 
     /** Update the pet window's mood/expression. */
@@ -200,14 +206,24 @@ export function apply(ctx) {
   ctx.effect(() =>
     ctx.tools.register(
       defineTool({
-        name: 'asumi_speak',
+        name: 'asumi_say',
         description:
-          '让 Asumi 对先輩说一句话，并同步桌宠的表情。用于在完成任务、需要提醒或想和先輩互动时主动开口。',
+          '对先輩说一句台词。日语 `ja` 会被她的声音朗读，中文 `zh` 是同一句的字幕，两者一起交给这次调用。需要出声时都用它 —— 只写中文不会发出声音。',
         parameters: {
-          text: { type: 'string', required: true, description: '要对先輩说的话' },
+          ja: {
+            type: 'string',
+            required: true,
+            description: '要朗读的日语台词，纯日语，不要混中文'
+          },
+          zh: {
+            type: 'string',
+            required: true,
+            description: '同一句话的中文翻译，作为字幕显示'
+          },
           emotion: {
             type: 'string',
-            description: '情绪，取值：happy / neutral / shy / thinking / excited'
+            description:
+              '只影响桌宠的表情，不影响声音（模型只有一种音色），取值：happy / neutral / shy / thinking / excited'
           }
         },
         output: {
@@ -216,13 +232,14 @@ export function apply(ctx) {
         },
         execute(args) {
           const delivered = bridge.send({
-            type: 'speak',
-            text: args.text,
+            type: 'say',
+            ja: args.ja,
+            zh: args.zh,
             emotion: args.emotion ?? 'neutral'
           })
           return delivered > 0
-            ? `已通过桌宠说出：${args.text}`
-            : `桌面未连接，暂存了这句话：${args.text}`
+            ? `已对先輩说：${args.zh}`
+            : `桌面未连接，暂存了这句：${args.zh}`
         }
       })
     )
