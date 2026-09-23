@@ -16,7 +16,13 @@
  *   --route <name>      DSH provider route key (default: derived, lowercase-hyphen)
  *   --api-key <key>     Override the key read from Cherry
  *   --modalities <csv>  Model input modalities, e.g. `text,image` (default: text)
+ *   --set-default       Also make this model the deployment default
  *   --dry-run           Print the resulting sections without writing
+ *
+ * The default model is deliberately left alone: the app ships no opinion about
+ * which provider should serve new sessions, and a migration that also rewrote
+ * the default would quietly make one user's route the app's preference. Pass
+ * --set-default to ask for it.
  */
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -50,12 +56,14 @@ const DB_PATH = CHERRY_DB_CANDIDATES.find((candidate) => existsSync(candidate))
 const CREDENTIAL_ENV = 'ASUMI_MODEL_API_KEY'
 
 /**
- * The route the fallback plugin uses, and the credential its adapter resolves.
- * Migrated too, because a fallback nobody can authenticate against is worse
- * than no fallback: the turn ends on the fallback's error instead.
+ * The credential the deployment default's own provider resolves.
+ *
+ * Migrated alongside the user's model because DeepSeek is what the harness
+ * starts new sessions on and what a self-hosted route falls back to; without
+ * its key those paths fail on a missing credential instead.
  */
-const FALLBACK_CREDENTIAL_ENV = 'DEEPSEEK_API_KEY'
-const FALLBACK_PROVIDER = 'deepseek'
+const DEFAULT_CREDENTIAL_ENV = 'DEEPSEEK_API_KEY'
+const DEFAULT_PROVIDER = 'deepseek'
 
 /** Cherry endpoint type -> pi-ai wire protocol. */
 const API_BY_ENDPOINT = {
@@ -182,24 +190,30 @@ function main() {
       }
     ]
   })
-  settings.setIn(['agent-default-model'], { provider: route, model: model.model_id })
+  if (options['set-default']) {
+    settings.setIn(['agent-default-model'], { provider: route, model: model.model_id })
+  }
 
   const credentials = readCredentials()
   credentials.setIn(['refs', CREDENTIAL_ENV], apiKey)
 
-  // A DeepSeek key enables the fallback route; absent, the app simply has no
-  // fallback and says so at request time like any missing credential.
-  const fallbackKey = readCherryKey(FALLBACK_PROVIDER)
-  if (fallbackKey) credentials.setIn(['refs', FALLBACK_CREDENTIAL_ENV], fallbackKey)
+  // Absent, the default model simply fails like any missing credential.
+  const fallbackKey = readCherryKey(DEFAULT_PROVIDER)
+  if (fallbackKey) credentials.setIn(['refs', DEFAULT_CREDENTIAL_ENV], fallbackKey)
 
   console.log(`route      ${route} (${api} -> ${endpoint.baseUrl})`)
   console.log(`model      ${model.model_id} [${modalities.join(', ')}]`)
   console.log(`settings   ${SETTINGS_PATH}`)
+  console.log(
+    options['set-default']
+      ? 'default    this model (per --set-default)'
+      : 'default    left as it is (pass --set-default to change it)'
+  )
   console.log(`credential ${CREDENTIALS_PATH} refs.${CREDENTIAL_ENV}`)
   console.log(
     fallbackKey
-      ? `credential ${CREDENTIALS_PATH} refs.${FALLBACK_CREDENTIAL_ENV} (fallback route)`
-      : `no ${FALLBACK_PROVIDER} key in the Cherry database; fallback left unconfigured`
+      ? `credential ${CREDENTIALS_PATH} refs.${DEFAULT_CREDENTIAL_ENV} (default model)`
+      : `no ${DEFAULT_PROVIDER} key in the Cherry database; the default model has no credential`
   )
 
   if (options.dryRun) {
@@ -208,7 +222,7 @@ function main() {
     console.log(
       stringify({
         'llm-pi-ai': js['llm-pi-ai'],
-        'agent-default-model': js['agent-default-model']
+        ...(options['set-default'] ? { 'agent-default-model': js['agent-default-model'] } : {})
       })
     )
     return

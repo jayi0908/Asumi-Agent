@@ -1,16 +1,15 @@
 # asumi-fallback bundle layer
 #
-# Inserts the model-fallback plugin. It listens on the agent's request-error
-# waterfall: once the built-in retries are exhausted, a failed request is
-# re-run on the fallback route instead of ending the turn.
+# Inserts the model-availability plugin. It works on the `agent/request`
+# waterfall: an attempt whose route is a self-hosted one (it carries a
+# `baseURL`) that is not answering is sent to the deployment default instead —
+# including the retry of the very attempt that failed, so the turn survives.
 #
-# `primary` is deliberately absent — the plugin falls back for whichever route
-# failed, so renaming or replacing the primary provider in settings.yaml cannot
-# silently disable it.
+# No provider is named here on purpose: which routes exist, and which one is the
+# default, is the user's settings document, not the app's knowledge.
 - insert:
     - id: asumi-fallback
       name: asumi-plugin-fallback
       config:
-        fallback:
-          provider: deepseek-official
-          model: deepseek-flash
+        probeIntervalMs: 30000
+        probeTimeoutMs: 2000
