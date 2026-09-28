@@ -23,10 +23,10 @@ The project is in early development, starting from macOS, with the following pla
 
 - [x] **Menu Bar**: Display an Asumi-themed icon in the menu bar with contextual actions.
 - [x] **Multi-Model Support**: Connect to various LLM providers (cloud API / local models) for flexible conversation and interactions.
-- [ ] **Desktop Pet**: Show Asumi's character on the desktop with text-based interaction.
-- [ ] **Voice Output**: TTS-powered voice synthesis in Asumi's character voice for immersive interaction.
-- [ ] **Transparent Companion**: Two modes — persistent (always on screen) and transparent (appears only under certain conditions).
-- [ ] **Screen Understanding**: Periodically capture screen content, analyze it via multimodal LLM, and let Asumi react to what you're doing.
+- [x] **Desktop Pet**: Show Asumi's character on the desktop with text-based interaction.
+- [x] **Voice Output**: TTS-powered voice synthesis in Asumi's character voice for immersive interaction.
+- [x] **Transparent Companion**: Two modes — persistent (always on screen) and transparent (appears only under certain conditions).
+- [x] **Screen Understanding**: Periodically capture screen content, analyze it via multimodal LLM, and let Asumi react to what you're doing.
 - [ ] **Quick Command Execution**: Define shortcuts or scripts for Asumi to execute, providing practical utility.
 - [ ] **Audio Playback**: Built-in audio clips related to Asumi for atmosphere.
 - [x] **Quick Launch**: Summon a mini chat window via global hotkey for rapid interaction.
@@ -74,8 +74,13 @@ cd Asumi-Agent
 # in-repo plugins import
 pnpm install
 
-# Create the engine profile (first run only; the plugins are linked from this repo)
+# Create the engine profile (first run only)
 pnpm dsh --profile asumi --from-default-profile web
+
+# Add the Asumi bundles to that profile. Without this the app runs as plain
+# DSH: the persona, the desktop bridge, and the regenerate action are all
+# plugins, and a fresh profile has none of them.
+pnpm dsh plugin --profile asumi add ./asumi-plugins/asumi-persona ./asumi-plugins/asumi-desktop ./asumi-plugins/asumi-fallback ./asumi-plugins/asumi-regenerate
 
 # Run in dev mode — the shell starts the engine itself
 pnpm dev

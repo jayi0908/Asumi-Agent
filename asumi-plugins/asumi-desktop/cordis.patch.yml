@@ -1,8 +1,8 @@
 # asumi-desktop bundle layer
 #
 # Inserts the desktop bridge plugin. It exposes `ctx.asumiDesktop` and the
-# model-facing `asumi_speak` tool, and opens a line-JSON bridge on
-# 127.0.0.1:${ASUMI_DESKTOP_PORT:-3099} for the Tauri shell to connect to.
+# model-facing `asumi_say` / `asumi_look` / `asumi_presence` tools, and opens a
+# line-JSON bridge on 127.0.0.1:${ASUMI_DESKTOP_PORT:-3099} for the Tauri shell.
 - insert:
     - id: asumi-desktop
       name: asumi-plugin-desktop

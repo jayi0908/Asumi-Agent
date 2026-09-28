@@ -19,7 +19,9 @@ asumi-plugins/
 | 插件 | 作用 | 状态 |
 |---|---|---|
 | `asumi-persona` | 錦 あすみ 的人设（system prompt 段）+ `asumi_name` 变量 | ✅ |
-| `asumi-desktop` | 桌面桥：`ctx.asumiDesktop`（speak / pet-state / pet-mode / audio / notify / capture-screen）+ 工具 `asumi_speak` / `asumi_look` / `asumi_presence`；监听 `127.0.0.1:3099` 供 Tauri 连接 | ✅ 通话链路已实测 |
+| `asumi-desktop` | 桌面桥：`ctx.asumiDesktop`（`say` / `setPetState` / `setPetMode` / `playAudio` / `notify` / `captureScreen`）+ 工具 `asumi_say` / `asumi_presence` / `asumi_look`；监听 `127.0.0.1:${ASUMI_DESKTOP_PORT:-3099}`（端口由壳分配）供 Tauri 连接 | ✅ |
+| `asumi-fallback` | 自建的 route 探测不通时，把这一次请求改走用户提名的兜底（`agent/request` 瀑布） | ✅ |
+| `asumi-regenerate` | 纯客户端插件：回答操作条上的「重新生成」（从提问处 fork 后重问，旧回答留在原会话） | ✅ |
 
 ## 安装到 profile
 
