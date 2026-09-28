@@ -55,6 +55,15 @@ pub fn run() {
             // Show the main window immediately; it holds a "starting the
             // engine" page until DSH announces its URL, then navigates.
             if let Some(main) = handle.get_webview_window(labels::MAIN) {
+                // Start from a clean WebKit store. The engine ships its client
+                // plugins as one multi-megabyte "combo" script whose URL is
+                // content-hashed, so a stale or half-committed cache entry for
+                // it makes the client boot die with "Failed to load plugins" —
+                // and because that URL stays stable while the content does, a
+                // reload keeps hitting the same entry. Clearing here is free:
+                // the engine's token URL re-auths and its per-run origin is new.
+                let _ = main.clear_all_browsing_data();
+
                 let _ = main.show();
                 // The menu bar's contrast follows the system theme.
                 let themed = handle.clone();

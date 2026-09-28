@@ -8,7 +8,7 @@
 //! the way, so a saved choice is never silently overridden.
 
 use std::collections::HashSet;
-use std::process::Command;
+use std::process::{Child, Command};
 
 use crate::settings;
 
@@ -73,8 +73,11 @@ pub fn selectable() -> Vec<String> {
     voices
 }
 
-/// Speak `text` out loud.
-pub fn speak(text: &str) {
+/// Speak `text` out loud, handing back the running player.
+///
+/// The caller owns the wait: the caption and the pet have to stay up for as
+/// long as she is actually talking, which only the player knows.
+pub fn speak(text: &str) -> Option<Child> {
     #[cfg(target_os = "macos")]
     {
         let voice = voice_for(text);
@@ -85,12 +88,19 @@ pub fn speak(text: &str) {
             command.arg("-v").arg(&voice);
         }
         match command.arg(text).spawn() {
-            Ok(child) => eprintln!("[asumi] tts speaking (pid {}, voice {voice})", child.id()),
-            Err(error) => eprintln!("[asumi] tts failed: {error}"),
+            Ok(child) => {
+                eprintln!("[asumi] tts speaking (pid {}, voice {voice})", child.id());
+                Some(child)
+            }
+            Err(error) => {
+                eprintln!("[asumi] tts failed: {error}");
+                None
+            }
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         println!("[asumi] speak: {text}");
+        None
     }
 }

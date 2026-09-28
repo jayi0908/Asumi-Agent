@@ -21,8 +21,10 @@ use crate::settings;
 /// Window label of the pet.
 pub const LABEL: &str = "pet";
 
-const WIDTH: f64 = 220.0;
-const HEIGHT: f64 = 320.0;
+/// Window size. Wide enough that a bilingual line wraps instead of being cut
+/// off, and tall enough that the caption has room to itself.
+const WIDTH: f64 = 360.0;
+const HEIGHT: f64 = 420.0;
 const MARGIN: f64 = 18.0;
 
 /// The presence mode last applied to the window.
@@ -202,7 +204,7 @@ pub fn set_state(app: &AppHandle, state: &str) {
     );
 }
 
-/// Show a speech bubble with one bilingual line, revealing the pet in ghost mode.
+/// Show a caption with one bilingual line, revealing the pet in ghost mode.
 ///
 /// `zh` is the subtitle and `ja` is what the voice reads; both are shown, in
 /// that order, the way the character's lines are presented in the source
@@ -221,13 +223,22 @@ pub fn say_pair(app: &AppHandle, zh: &str, ja: &str) {
     say(app, &lines.join("\n"));
 }
 
-/// Show a speech bubble, revealing the pet when she is in ghost mode.
+/// Show a caption, revealing the pet when she is in ghost mode.
 pub fn say(app: &AppHandle, text: &str) {
     reveal(app);
     eval(
         app,
         &format!("window.__asumiSay && window.__asumiSay({})", literal(text)),
     );
+}
+
+/// Tell the pet the voice has stopped, so the caption can run its dwell and go.
+///
+/// The caption is shown with the line, but it holds until this arrives: the
+/// agent hands the spoken half to the voice service, and synthesis can take
+/// seconds, so "she said it" is only true once the player has stopped.
+pub fn speech_done(app: &AppHandle) {
+    eval(app, "window.__asumiSpeechDone && window.__asumiSpeechDone()");
 }
 
 /// Bring the pet on screen for one utterance.

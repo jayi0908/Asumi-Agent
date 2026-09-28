@@ -23,12 +23,15 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tauri::AppHandle;
 
+use crate::pet;
 use crate::settings::{self, ShellSettings};
 
 /// How long a health probe may take before the service counts as absent.
@@ -40,46 +43,222 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The service process, when this app is the one that started it.
 static SERVICE: Mutex<Option<Child>> = Mutex::new(None);
-/// The player process, so a new line can cut off the previous one.
-static PLAYER: Mutex<Option<Child>> = Mutex::new(None);
+/// The current player and the speech generation that owns it, so a new line can
+/// cut off the previous one.
+static PLAYER: Mutex<Option<(u64, Child)>> = Mutex::new(None);
+/// Speech generations: a newer utterance invalidates an older one's work.
+static SPEECH_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Speak one Japanese line.
+/// Pause between spoken lines, so a reply reads like galgame dialogue.
+const LINE_GAP: Duration = Duration::from_millis(1000);
+/// How long a caption waits when its line has no voice to time it against.
+const SILENT_DWELL: Duration = Duration::from_millis(1800);
+
+/// Speak one bilingual reply, line by line.
 ///
-/// The caller passes the `ja` field of a bilingual line, so the text is
-/// Japanese by contract and goes to the service as-is: no sentence surgery,
-/// which would disturb the model's own punctuation and pauses.
-pub fn speak(_app: &AppHandle, text: &str) {
-    let current = settings::get();
-    if current.voice_backend == "system" {
-        crate::voice::speak(text);
+/// The model splits its reply into short lines — one galgame beat each. This
+/// plays them in order: it shows a line's caption, plays that line's voice,
+/// holds the caption until the voice stops, waits `LINE_GAP`, and moves on.
+/// While a line plays, the next line's voice is synthesized in the background,
+/// so the pause between lines is usually just the gap. Synthesis and playback
+/// never overlap on the model itself — it serializes its own inference — so the
+/// prefetch is pipelining, not concurrency.
+pub fn say(app: &AppHandle, lines: &[(String, String)]) {
+    if lines.is_empty() {
+        return;
+    }
+    let shell = settings::get();
+    let system = shell.voice_backend == "system";
+
+    // Claim the utterance before any slow work, so a newer reply supersedes
+    // this one even while the service is still warming up.
+    let generation = begin_speech();
+
+    let voiced: Vec<bool> = lines
+        .iter()
+        .map(|(ja, _)| wants_voice(system, ja))
+        .collect();
+    let service_ready = if system || !voiced.iter().any(|voiced| *voiced) {
+        true
+    } else {
+        match ensure_service(&shell) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("[asumi] tts: {error}; staying silent");
+                false
+            }
+        }
+    };
+    if !is_current(generation) {
         return;
     }
 
-    let line = text.trim();
-    if line.is_empty() {
-        return;
-    }
+    let mut prefetched: Option<Receiver<Result<Vec<u8>, String>>> = None;
+    for (index, (ja, zh)) in lines.iter().enumerate() {
+        if !is_current(generation) {
+            return;
+        }
 
-    // Kana is still required. A line without it is Chinese or English that
-    // reached the wrong field, and a Japanese-only frontend reads those with
-    // the wrong phonemes — worse than saying nothing.
-    if !line.chars().any(is_kana) {
-        eprintln!("[asumi] tts: no kana in the line; staying silent");
-        return;
-    }
+        let audible = voiced[index] && service_ready;
+        let audio = if audible && !system {
+            match prefetched.take() {
+                // Started while the previous line was playing.
+                Some(receiver) => receiver.recv().ok().and_then(|result| result.ok()),
+                None => synthesize_now(generation, &shell, ja),
+            }
+        } else {
+            None
+        };
 
-    eprintln!("[asumi] tts: speaking \"{}\"", preview(line));
-    if let Err(error) = speak_with_service(&current, line) {
-        eprintln!("[asumi] tts: {error}; staying silent");
+        // Start the next line now; it synthesizes during this line's playback.
+        if let Some((next_ja, _)) = lines.get(index + 1) {
+            if !system && service_ready && wants_voice(system, next_ja) {
+                prefetched = Some(synthesize_later(generation, &shell, next_ja));
+            }
+        }
+
+        pet::say_pair(app, zh, ja);
+        if !ja.trim().is_empty() {
+            eprintln!("[asumi] tts: line {} \"{}\"", index + 1, preview(ja));
+        }
+
+        let played = if system && audible {
+            crate::voice::speak(ja)
+                .map(|player| await_player(generation, player))
+                .unwrap_or(false)
+        } else if let Some(wav) = audio {
+            match play(generation, &wav) {
+                Ok(played) => played,
+                Err(error) => {
+                    eprintln!("[asumi] tts: {error}; staying silent");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        if !is_current(generation) {
+            return;
+        }
+        if !played {
+            // Nothing to time the caption against — no voice, service down, or a
+            // failed request: let the line be read for a beat.
+            std::thread::sleep(SILENT_DWELL);
+            if !is_current(generation) {
+                return;
+            }
+        }
+        pet::speech_done(app);
+
+        if index + 1 < lines.len() {
+            std::thread::sleep(LINE_GAP);
+        }
     }
 }
 
-/// Synthesize and play one Japanese line through the service.
-fn speak_with_service(settings: &ShellSettings, text: &str) -> Result<(), String> {
-    ensure_service(settings)?;
+/// Whether a line should be voiced at all.
+fn wants_voice(system: bool, ja: &str) -> bool {
+    let line = ja.trim();
+    if line.is_empty() {
+        return false;
+    }
+    // System voices read any script; the cloned model is Japanese-only, so a
+    // line without kana is Chinese or English that reached the wrong field and
+    // is better left silent than read with Japanese phonemes.
+    system || line.chars().any(is_kana)
+}
 
-    let audio = synthesize(&settings.tts_url, text, settings.tts_length)?;
-    play(&audio)
+/// Claim the next speech generation, cutting off whatever is still playing.
+fn begin_speech() -> u64 {
+    let generation = SPEECH_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Ok(mut guard) = PLAYER.lock() {
+        if let Some((_, mut previous)) = guard.take() {
+            // A companion should finish her sentence over the old one, not
+            // alongside it.
+            let _ = previous.kill();
+            let _ = previous.wait();
+        }
+    }
+    generation
+}
+
+/// Whether this utterance is still the most recent one.
+fn is_current(generation: u64) -> bool {
+    SPEECH_SEQ.load(Ordering::SeqCst) == generation
+}
+
+/// Synthesize one line here and now.
+fn synthesize_now(generation: u64, shell: &ShellSettings, text: &str) -> Option<Vec<u8>> {
+    if !is_current(generation) {
+        return None;
+    }
+    match synthesize(&shell.tts_url, text, shell.tts_length) {
+        Ok(audio) => Some(audio),
+        Err(error) => {
+            eprintln!("[asumi] tts: {error}; staying silent");
+            None
+        }
+    }
+}
+
+/// Synthesize one line on a worker, so it is ready when its turn comes.
+fn synthesize_later(
+    generation: u64,
+    shell: &ShellSettings,
+    text: &str,
+) -> Receiver<Result<Vec<u8>, String>> {
+    let (sender, receiver) = mpsc::channel();
+    let base = shell.tts_url.clone();
+    let length = shell.tts_length;
+    let text = text.to_string();
+    std::thread::spawn(move || {
+        let result = if is_current(generation) {
+            synthesize(&base, &text, length)
+        } else {
+            Err("superseded".to_string())
+        };
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+/// Own one player to completion.
+///
+/// The wait runs off the mutex so a new utterance can still replace the player.
+/// Returns whether this line still owned it when it stopped: a superseded line
+/// must not time a caption that now belongs to the line that replaced it.
+fn await_player(generation: u64, mut player: Child) -> bool {
+    {
+        let Ok(mut guard) = PLAYER.lock() else {
+            return false;
+        };
+        // Checked under the lock: a line superseded while it was still
+        // synthesizing must not join the audio of the line that replaced it.
+        if !is_current(generation) {
+            let _ = player.kill();
+            let _ = player.wait();
+            return false;
+        }
+        *guard = Some((generation, player));
+    }
+    loop {
+        std::thread::sleep(Duration::from_millis(60));
+        let Ok(mut guard) = PLAYER.lock() else {
+            return false;
+        };
+        match guard.as_mut() {
+            Some((owner, child)) if *owner == generation => match child.try_wait() {
+                Ok(Some(_)) | Err(_) => {
+                    guard.take();
+                    break;
+                }
+                Ok(None) => {}
+            },
+            _ => return false,
+        }
+    }
+    is_current(generation)
 }
 
 /// Make sure the service is answering, starting it when allowed to.
@@ -214,28 +393,20 @@ fn synthesize(base: &str, text: &str, length: f64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Play one WAV, cutting off whatever was still playing.
-fn play(audio: &[u8]) -> Result<(), String> {
+/// Play one WAV and stay with it, so the caption lasts as long as the voice.
+fn play(generation: u64, audio: &[u8]) -> Result<bool, String> {
     let path = std::env::temp_dir().join(format!("asumi-voice-{}.wav", std::process::id()));
     std::fs::write(&path, audio).map_err(|e| format!("could not write the audio: {e}"))?;
 
-    if let Ok(mut guard) = PLAYER.lock() {
-        if let Some(mut previous) = guard.take() {
-            // A companion should finish her sentence over the old one, not
-            // alongside it.
-            let _ = previous.kill();
-            let _ = previous.wait();
-        }
-        let child = Command::new("/usr/bin/afplay")
-            .arg(&path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("could not play the audio: {e}"))?;
-        *guard = Some(child);
-    }
-    Ok(())
+    let player = Command::new("/usr/bin/afplay")
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("could not play the audio: {e}"))?;
+
+    Ok(await_player(generation, player))
 }
 
 /// The port in a service URL, when it names one.
@@ -265,12 +436,16 @@ fn preview(text: &str) -> String {
 /// Stop anything this module started: the player first, so the app can exit
 /// without a voice still talking, then the service.
 pub fn shutdown() {
-    for slot in [&PLAYER, &SERVICE] {
-        if let Ok(mut guard) = slot.lock() {
-            if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+    if let Ok(mut guard) = PLAYER.lock() {
+        if let Some((_, mut player)) = guard.take() {
+            let _ = player.kill();
+            let _ = player.wait();
+        }
+    }
+    if let Ok(mut guard) = SERVICE.lock() {
+        if let Some(mut service) = guard.take() {
+            let _ = service.kill();
+            let _ = service.wait();
         }
     }
 }

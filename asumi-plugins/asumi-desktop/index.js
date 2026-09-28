@@ -208,17 +208,30 @@ export function apply(ctx) {
       defineTool({
         name: 'asumi_say',
         description:
-          '对先輩说一句台词。日语 `ja` 会被她的声音朗读，中文 `zh` 是同一句的字幕，两者一起交给这次调用。需要出声时都用它 —— 只写中文不会发出声音。',
+          '对先輩说话。把要说的内容拆成若干句短台词一次交给它，她会一句一句地念出来（像 galgame 逐句播放）：' +
+          '`lines` 里每句一个 `{ ja, zh }`，`ja` 是要朗读的日语（纯日语），`zh` 是这句的中文（和正文对应）。' +
+          '每句都会被单独发声、句与句之间停顿约两秒。方便朗读时才用它 —— 只写中文不会发出声音。',
         parameters: {
-          ja: {
-            type: 'string',
+          lines: {
+            type: 'array',
             required: true,
-            description: '要朗读的日语台词，纯日语，不要混中文'
-          },
-          zh: {
-            type: 'string',
-            required: true,
-            description: '同一句话的中文翻译，作为字幕显示'
+            description: '这次要说的台词，按播放顺序排列；每句尽量短（≤ 30 字），最多 6 句',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                ja: {
+                  type: 'string',
+                  required: true,
+                  description: '这句要朗读的日语，纯日语，不要混中文'
+                },
+                zh: {
+                  type: 'string',
+                  required: true,
+                  description: '这句的中文，和正文对应，作为桌宠字幕'
+                }
+              }
+            }
           },
           emotion: {
             type: 'string',
@@ -231,15 +244,25 @@ export function apply(ctx) {
           render: (_args, value) => [{ type: 'text', text: value }]
         },
         execute(args) {
+          const lines = (Array.isArray(args.lines) ? args.lines : [])
+            .map((line) => ({
+              ja: String((line && line.ja) || '').trim(),
+              zh: String((line && line.zh) || '').trim()
+            }))
+            .filter((line) => line.ja !== '' || line.zh !== '')
+          if (lines.length === 0) {
+            return '没有可说的内容：`lines` 至少要有 1 句。'
+          }
+
           const delivered = bridge.send({
             type: 'say',
-            ja: args.ja,
-            zh: args.zh,
+            lines,
             emotion: args.emotion ?? 'neutral'
           })
+          const said = lines.map((line) => line.zh).filter((zh) => zh !== '').join('')
           return delivered > 0
-            ? `已对先輩说：${args.zh}`
-            : `桌面未连接，暂存了这句：${args.zh}`
+            ? `已对先輩说（${lines.length} 句）：${said}`
+            : `桌面未连接，暂存了（${lines.length} 句）：${said}`
         }
       })
     )

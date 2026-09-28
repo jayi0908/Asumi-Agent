@@ -94,20 +94,16 @@ fn handle(app: &AppHandle, message: &Value) {
     eprintln!("[asumi] desktop <- {kind}");
     match kind {
         "say" => {
-            let ja = message.get("ja").and_then(|v| v.as_str()).unwrap_or("");
-            let zh = message.get("zh").and_then(|v| v.as_str()).unwrap_or("");
-            if ja.trim().is_empty() && zh.trim().is_empty() {
+            let lines = parse_lines(message);
+            if lines.is_empty() {
                 return;
             }
-            pet::say_pair(app, zh, ja);
-            // Only the Japanese half is voiced; the Chinese half is the
-            // subtitle. Synthesis may block while the model loads, so it does
-            // not run on the bridge's reader thread.
-            if !ja.trim().is_empty() {
-                let handle = app.clone();
-                let spoken = ja.to_string();
-                std::thread::spawn(move || tts::speak(&handle, &spoken));
-            }
+            // One worker owns the whole utterance: it plays the lines in order,
+            // times each caption to its voice, and prefetches the next line's
+            // synthesis while the current one plays. The bridge reader stays
+            // free, and synthesis may block while the model loads.
+            let handle = app.clone();
+            std::thread::spawn(move || tts::say(&handle, &lines));
         }
         "pet-state" => {
             let state = message
@@ -144,6 +140,34 @@ fn handle(app: &AppHandle, message: &Value) {
             capture_screen(request_id, message);
         }
         other => println!("[asumi] unhandled desktop message: {other}"),
+    }
+}
+
+/// The bilingual lines of a `say`: the `lines` array, or a bare `ja`/`zh` pair.
+///
+/// Each line is one spoken sentence — the model splits its reply so the voice
+/// and the caption line up the way galgame dialogue does.
+fn parse_lines(message: &Value) -> Vec<(String, String)> {
+    if let Some(items) = message.get("lines").and_then(|value| value.as_array()) {
+        let mut lines = Vec::new();
+        for item in items {
+            let ja = item.get("ja").and_then(|value| value.as_str()).unwrap_or("").trim();
+            let zh = item.get("zh").and_then(|value| value.as_str()).unwrap_or("").trim();
+            if !ja.is_empty() || !zh.is_empty() {
+                lines.push((ja.to_string(), zh.to_string()));
+            }
+        }
+        if !lines.is_empty() {
+            return lines;
+        }
+    }
+
+    let ja = message.get("ja").and_then(|value| value.as_str()).unwrap_or("").trim();
+    let zh = message.get("zh").and_then(|value| value.as_str()).unwrap_or("").trim();
+    if ja.is_empty() && zh.is_empty() {
+        Vec::new()
+    } else {
+        vec![(ja.to_string(), zh.to_string())]
     }
 }
 

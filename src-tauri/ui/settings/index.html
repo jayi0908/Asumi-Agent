@@ -187,10 +187,11 @@
         <p>
           あすみ 只说日语：台词里的日语行会被朗读，中文行不发声。模型是单独仓库里的
           本地服务，这里指定它在哪；服务没应答就不出声，不会切换到别的嗓音。
+          选「手动启动」时应用只负责连接，只需填服务地址。
         </p>
         <div class="options" id="voiceBackend"></div>
 
-        <div class="field">
+        <div class="field" id="ttsRepoField">
           <span>语音仓库</span>
           <input id="ttsRepo" type="text" placeholder="/path/to/Asumi-TTS" />
         </div>
@@ -198,7 +199,7 @@
           <span>服务地址</span>
           <input id="ttsUrl" type="text" placeholder="http://127.0.0.1:8077" />
         </div>
-        <div class="field">
+        <div class="field" id="ttsPythonField">
           <span>Python 路径</span>
           <input id="ttsPython" type="text" placeholder="python3" />
         </div>
@@ -384,6 +385,12 @@
         setValue('ttsUrl', state.ttsUrl)
         setValue('ttsPython', state.ttsPython)
         setValue('ttsLength', state.ttsLength)
+
+        // Manual start: the shell only connects, so where the repository lives
+        // and which interpreter would launch it are not part of the setup.
+        const manual = !state.ttsLazyStart
+        document.getElementById('ttsRepoField').style.display = manual ? 'none' : ''
+        document.getElementById('ttsPythonField').style.display = manual ? 'none' : ''
 
         fillVoices(document.getElementById('voice'), state.voice)
         fillVoices(document.getElementById('voiceJa'), state.voiceJa)

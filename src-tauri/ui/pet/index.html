@@ -75,49 +75,64 @@
         opacity: 0;
       }
 
-      .bubble {
+      /* 字幕容器。撑满整个窗口（留一圈边距），文字贴底排布，超出就靠缩字号消化，
+         不裁切。 */
+      .caption {
         position: absolute;
-        top: 4px;
-        left: 50%;
-        transform: translateX(-50%) scale(0.9);
-        max-width: 92%;
-        padding: 7px 11px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.96);
-        color: #2b2b3a;
-        font-size: 12px;
-        line-height: 1.45;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
-        /* A bilingual line arrives with a newline between the subtitle and the
-           spoken line; without this, HTML collapses it into one run-on row. */
-        white-space: pre-line;
-        opacity: 0;
-        transition:
-          opacity 0.22s ease,
-          transform 0.22s ease;
+        left: 0;
+        right: 0;
+        top: 6px;
+        bottom: 6px;
+        /* 立绘带 transform（漂浮）与 filter，会自成层叠上下文，而且在文档里更靠后，
+           不加这个就会被画在字幕上面。 */
+        z-index: 2;
+        display: flex;
+        align-items: flex-end;
+        overflow: hidden;
         pointer-events: none;
+      }
+
+      /* 字幕本体：白字 + 深色描边，不画气泡（参考 MurasamePet 的呈现）。
+         描边用八向 text-shadow，这是所有 WebKit 版本都认的做法。 */
+      .lines {
+        width: 100%;
+        padding: 0 12px;
+        text-align: center;
+        font-weight: 700;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #fff;
         word-break: break-word;
+        text-shadow:
+          -1.5px -1.5px 0 #2c161c,
+          1.5px -1.5px 0 #2c161c,
+          -1.5px 1.5px 0 #2c161c,
+          1.5px 1.5px 0 #2c161c,
+          -1.5px 0 0 #2c161c,
+          1.5px 0 0 #2c161c,
+          0 -1.5px 0 #2c161c,
+          0 1.5px 0 #2c161c,
+          0 2px 4px rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        transform: translateY(4px);
+        transition:
+          opacity 0.18s ease,
+          transform 0.18s ease;
       }
 
-      .bubble.show {
+      .caption.show .lines {
         opacity: 1;
-        transform: translateX(-50%) scale(1);
+        transform: none;
       }
 
-      .bubble::after {
-        content: "";
-        position: absolute;
-        bottom: -6px;
-        left: 50%;
-        transform: translateX(-50%);
-        border-left: 6px solid transparent;
-        border-right: 6px solid transparent;
-        border-top: 6px solid rgba(255, 255, 255, 0.96);
+      /* 中文一行、日语一行，各自流式浮出。 */
+      .line {
+        display: block;
       }
 
       .asumi {
         width: 100%;
-        max-height: 100%;
+        max-height: 340px;
         object-fit: contain;
         object-position: bottom;
         animation: float 3.4s ease-in-out infinite;
@@ -153,66 +168,153 @@
   </head>
   <body data-state="neutral" data-presence="always" data-appearance="fade">
     <div class="stage">
-      <div class="bubble" id="bubble"></div>
+      <div class="caption" id="caption"><div class="lines" id="lines"></div></div>
       <img class="asumi" id="asumi" src="./asumi.png" alt="Asumi" />
     </div>
     <script>
-      const bubble = document.getElementById('bubble')
+      const caption = document.getElementById('caption')
+      const linesEl = document.getElementById('lines')
 
-      // How long she stays after speaking before withdrawing (the shell's
-      // "开口，5s 后收回").
-      const DWELL_MS = 5000
+      // 说完之后还留多久（壳侧的「开口，停留后收回」）。
+      const DWELL_MS = 4000
+      // 一直收不到「说完了」信号时的兜底，避免字幕永久停住。
+      const SAFETY_MS = 180000
+      // 一行字幕逐字浮现的基础节奏；长的那行按这个速度走，短的那行放慢，
+      // 让中/日两行同时开始、同时结束。
+      const MS_PER_CHAR = 80
+      const MAX_FONT = 15
+      const MIN_FONT = 13
 
       let presence = 'always'
       let appearance = 'fade'
       let hideTimer = null
-      let dwellTimer = null
+      let streams = []
 
-      // Called from the Tauri shell when the presence mode changes.
+      // 壳侧切换存在方式时调用。
       window.__asumiSetPresence = (next) => {
         presence = next || 'always'
         document.body.dataset.presence = presence
         if (presence !== 'ghost') withdraw()
       }
 
-      // Called from the Tauri shell when the appearance module changes.
+      // 壳侧切换出现模组时调用。
       window.__asumiSetAppearance = (next) => {
         appearance = next || 'fade'
         document.body.dataset.appearance = appearance
       }
 
-      // Called from the Tauri shell when the agent changes the pet mood.
+      // 壳侧切换情绪时调用。
       window.__asumiSetState = (state) => {
         document.body.dataset.state = state || 'neutral'
       }
 
-      // Show her for one dwell, restarting the timer on a repeat utterance
-      // rather than withdrawing mid-sentence.
-      window.__asumiReveal = () => {
-        if (presence !== 'ghost') return
-        document.body.classList.add('asumi-active')
-        if (dwellTimer) clearTimeout(dwellTimer)
-        dwellTimer = setTimeout(withdraw, DWELL_MS)
+      function scheduleHide(ms) {
+        if (hideTimer) clearTimeout(hideTimer)
+        hideTimer = setTimeout(withdraw, ms)
+      }
+
+      function stopStreams() {
+        for (const stream of streams) {
+          if (stream.timer) clearInterval(stream.timer)
+        }
+        streams = []
       }
 
       function withdraw() {
-        if (dwellTimer) clearTimeout(dwellTimer)
-        dwellTimer = null
+        if (hideTimer) {
+          clearTimeout(hideTimer)
+          hideTimer = null
+        }
+        stopStreams()
         document.body.classList.remove('asumi-active')
+        caption.classList.remove('show')
       }
 
-      // Called from the Tauri shell when Asumi speaks.
+      // 只现身、不说话时（例如换情绪）也能看到人：停留一个 dwell 后收回。
+      window.__asumiReveal = () => {
+        if (presence !== 'ghost') return
+        document.body.classList.add('asumi-active')
+        scheduleHide(DWELL_MS)
+      }
+
+      // 说完了：把还没打出的字一次补全，然后开始停留计时。
+      window.__asumiSpeechDone = () => {
+        for (const stream of streams) {
+          if (stream.timer) {
+            clearInterval(stream.timer)
+            stream.timer = null
+          }
+          stream.node.textContent = stream.glyphs.join('')
+        }
+        scheduleHide(DWELL_MS)
+      }
+
+      // 壳侧收到台词时调用。台词是「中文一行 + 日语一行」（换行分隔）：中文与日语
+      // 同时流式浮现，各自按长度配速，最后一起打完。字幕立刻出现，但要一直留到
+      // 语音结束（壳侧随后会再发 __asumiSpeechDone）：合成可能要好几秒，固定计时
+      // 会在出声前就把字幕收掉。
       window.__asumiSay = (text) => {
         if (!text) return
-        bubble.textContent = text
-        bubble.classList.add('show')
-        window.__asumiReveal()
-        if (hideTimer) clearTimeout(hideTimer)
-        hideTimer = setTimeout(() => bubble.classList.remove('show'), DWELL_MS)
+        const lines = text
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line !== '')
+        if (lines.length === 0) return
+
+        stopStreams()
+        fitFont(lines)
+        linesEl.replaceChildren()
+        for (const line of lines) {
+          const node = document.createElement('div')
+          node.className = 'line'
+          linesEl.append(node)
+          streams.push({ node, glyphs: Array.from(line), timer: null })
+        }
+
+        const longest = streams.reduce((most, stream) => Math.max(most, stream.glyphs.length), 1)
+        const total = longest * MS_PER_CHAR
+        for (const stream of streams) {
+          const count = stream.glyphs.length
+          if (count === 0) continue
+          // 短的一行拿到更大的间隔，于是两行在同一时刻收尾。
+          const interval = Math.max(total / count, 10)
+          let shown = 0
+          stream.timer = setInterval(() => {
+            shown += 1
+            stream.node.textContent = stream.glyphs.slice(0, shown).join('')
+            if (shown >= count) {
+              clearInterval(stream.timer)
+              stream.timer = null
+            }
+          }, interval)
+        }
+
+        if (presence === 'ghost') document.body.classList.add('asumi-active')
+        caption.classList.add('show')
+        scheduleHide(SAFETY_MS)
       }
 
-      // Adopt the state the shell injected before this script ran. Doing it
-      // last matters: the setters are assignments, not hoisted declarations.
+      // 用整段文字预排版，逐级缩字号直到装得下，保证长台词不被裁掉。
+      function fitFont(lines) {
+        linesEl.style.fontSize = MAX_FONT + 'px'
+        linesEl.replaceChildren()
+        for (const line of lines) {
+          const node = document.createElement('div')
+          node.className = 'line'
+          node.textContent = line
+          linesEl.append(node)
+        }
+        let size = MAX_FONT
+        while (size > MIN_FONT && linesEl.getBoundingClientRect().height > caption.clientHeight) {
+          size -= 0.5
+          linesEl.style.fontSize = size + 'px'
+        }
+        // 流式阶段会重建空节点。
+        linesEl.replaceChildren()
+      }
+
+      // 采纳壳侧在本脚本之前注入的状态。放在最后很重要：上面是赋值，不是
+      // 会被提升的函数声明。
       const init = window.__ASUMI_INIT || {}
       window.__asumiSetPresence(init.presence || presence)
       window.__asumiSetAppearance(init.appearance || appearance)
