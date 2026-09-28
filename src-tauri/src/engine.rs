@@ -13,6 +13,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
@@ -31,6 +32,12 @@ static ENGINE: Mutex<Option<Child>> = Mutex::new(None);
 pub fn spawn(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
+        // A previous run may have left its engine behind (a dev restart does not
+        // run this app's exit path), and that engine holds the profile's
+        // sessions: the next write to any of them fails with
+        // `SessionAlreadyOwnedError`. Reap them before starting ours.
+        kill_stale_engines();
+
         let Some(engine) = engine_dir(&handle) else {
             eprintln!("[asumi] no engine found; run scripts/build-engine.mjs or pnpm install");
             return;
@@ -84,6 +91,67 @@ pub fn spawn(app: &AppHandle) {
 
         follow(handle, stdout);
     });
+}
+
+/// Stop engines a previous run left behind.
+///
+/// A dev restart does not run this app's exit path, so the engine it started
+/// stays alive and holds the profile's sessions: the next engine then fails
+/// every write to them with `SessionAlreadyOwnedError`, and a conversation that
+/// was open in the stale engine cannot even be resumed. Every harness launcher
+/// for this profile is therefore stopped before a new one starts.
+fn kill_stale_engines() {
+    let Ok(output) = Command::new("/bin/ps").args(["-eo", "pid=,command="]).output() else {
+        return;
+    };
+    let own = std::process::id() as i32;
+
+    let mut stale = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((pid, command)) = line.trim_start().split_once(char::is_whitespace) else {
+            continue;
+        };
+        let Ok(pid) = pid.trim().parse::<i32>() else {
+            continue;
+        };
+        if pid <= 1 || pid == own {
+            continue;
+        }
+        if command.contains("dsh") && command.contains("bin.js") && command.contains("--profile asumi") {
+            stale.push(pid);
+        }
+    }
+    if stale.is_empty() {
+        return;
+    }
+
+    eprintln!("[asumi] stopping {} stale engine(s): {stale:?}", stale.len());
+    // Safety: each pid names a live harness launcher for this profile.
+    for pid in &stale {
+        unsafe { libc::kill(*pid, libc::SIGTERM) };
+    }
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(100));
+        if stale.iter().all(|pid| process_command(*pid).is_none()) {
+            return;
+        }
+    }
+    for pid in &stale {
+        unsafe { libc::kill(*pid, libc::SIGKILL) };
+    }
+}
+
+/// A process's command line, or `None` when it is not running.
+fn process_command(pid: i32) -> Option<String> {
+    let output = Command::new("/bin/ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!command.is_empty()).then_some(command)
 }
 
 /// Read the engine's output, echoing it and watching for the token URL.
