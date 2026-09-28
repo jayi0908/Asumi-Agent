@@ -45,6 +45,14 @@ const EMOTION_LABELS =
   'relieved 安心、angry 生气、agitated 激动、stunned 惊呆、grin 傻笑、' +
   'embarrassed 窘迫、cry 急哭、disgust 嫌弃、excited 兴奋'
 
+/**
+ * How much Japanese a reply may be spoken without `/asumi` forcing it.
+ *
+ * The model is told to speak only short, conversational replies; this is the
+ * backstop for when it ignores that and hands over an explanation to read out.
+ */
+const SPOKEN_CAP = 150
+
 function resolveDshHome() {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
 }
@@ -186,6 +194,58 @@ export function apply(ctx) {
   const bridge = createBridge()
   ctx.effect(() => () => bridge.close())
 
+  // Sessions that asked for speech regardless of length, via `/asumi`.
+  const forced = new Set()
+  const sessionIdOf = (agent) => {
+    const header = agent && agent.session && agent.session.header
+    return (header && header.id) || undefined
+  }
+
+  // The force flag rides the prompt: when it is set, the model is told it must
+  // speak, whatever it is answering. Registered through `ctx.inject` so a
+  // composition without those services (a headless run) still loads this plugin.
+  ctx.inject(['systemPrompt'], (scope) => {
+    scope.effect(() =>
+      scope.systemPrompt.section({
+        name: 'asumi:force-speak',
+        order: 60,
+        text: ({ agent }) => {
+          const id = sessionIdOf(agent)
+          return id && forced.has(id)
+            ? '先輩这一次明确要求出声（用了 `/asumi`）：无论内容长短都必须调用 `asumi_say` 出声；' +
+                '内容长的话，用几句短句概括核心即可，不要求逐字等于正文。'
+            : ''
+        }
+      })
+    )
+  })
+
+  ctx.inject(['commands'], (scope) => {
+    scope.effect(() =>
+      scope.commands.register({
+        name: 'asumi',
+        description: '切换「强制出声」：打开后每次回答都会让桌宠出声，直到再关掉',
+        input: { hint: 'on / off（省略即切换）' },
+        handler: ({ agent, rawInput }) => {
+          const id = sessionIdOf(agent)
+          if (id === undefined) {
+            return { kind: 'error', text: '当前没有会话，无法设置。' }
+          }
+          const argument = String(rawInput || '').trim().toLowerCase()
+          const next = argument === 'on' ? true : argument === 'off' ? false : !forced.has(id)
+          if (next) forced.add(id)
+          else forced.delete(id)
+          return {
+            kind: 'success',
+            text: next
+              ? '强制出声已打开：之后每次回答都会出声（用 /asumi off 关掉）'
+              : '强制出声已关闭：回到按内容决定是否出声'
+          }
+        }
+      })
+    )
+  })
+
   /** `ctx.asumiDesktop` — desktop capabilities for Asumi plugins and tools. */
   class AsumiDesktop extends Service {
     constructor(parent) {
@@ -287,7 +347,7 @@ export function apply(ctx) {
           schema: { type: 'string' },
           render: (_args, value) => [{ type: 'text', text: value }]
         },
-        execute(args) {
+        execute(args, exec) {
           const rows = Array.isArray(args.lines) ? args.lines : []
           if (rows.length === 0 && (args.ja || args.zh)) {
             // The array is the only accepted shape. A conversation that predates
@@ -309,6 +369,17 @@ export function apply(ctx) {
             .filter((line) => line.ja !== '' || line.zh !== '')
           if (lines.length === 0) {
             return '没有可说的内容：请用 `lines` 给出至少 1 句 `{ ja, zh, emotion }`。'
+          }
+
+          // Long explanations are for reading, not for listening to: unless the
+          // session asked for speech, refuse the line and say so.
+          const spoken = lines.reduce((total, line) => total + line.ja.length, 0)
+          const askedToSpeak = forced.has(sessionIdOf(exec && exec.agent))
+          if (!askedToSpeak && spoken > SPOKEN_CAP) {
+            return (
+              `这段话有 ${String(spoken)} 字，按设定这种解释不出声，写在正文里就好。` +
+              '如果先輩明确要求出声，可以用 `/asumi` 打开强制出声。'
+            )
           }
 
           const delivered = bridge.send({ type: 'say', lines })
