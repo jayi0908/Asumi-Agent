@@ -9,6 +9,42 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 const DEFAULT_PORT = 3099
 const DEFAULT_TIMEOUT_MS = 20_000
 
+/**
+ * The expressions Asumi can wear, named so the model can pick one.
+ *
+ * They mirror the game's expression diffs (`fa/`… `b0051`): the shell maps the
+ * name to that face and the pet draws it. The voice has one timbre, so this is
+ * expression alone.
+ */
+const EMOTIONS = [
+  'default',
+  'doubt',
+  'serious',
+  'helpless',
+  'confident',
+  'reproach',
+  'surprised',
+  'glad',
+  'pout',
+  'sad',
+  'sigh',
+  'relieved',
+  'angry',
+  'agitated',
+  'stunned',
+  'grin',
+  'embarrassed',
+  'cry',
+  'disgust',
+  'excited'
+]
+
+const EMOTION_LABELS =
+  'default 平静、doubt 疑惑、serious 认真、helpless 无奈、confident 自信、' +
+  'reproach 责备、surprised 惊讶、glad 欣慰、pout 嗔怪、sad 伤心、sigh 叹气、' +
+  'relieved 安心、angry 生气、agitated 激动、stunned 惊呆、grin 傻笑、' +
+  'embarrassed 窘迫、cry 急哭、disgust 嫌弃、excited 兴奋'
+
 function resolveDshHome() {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
 }
@@ -208,14 +244,17 @@ export function apply(ctx) {
       defineTool({
         name: 'asumi_say',
         description:
-          '对先輩说话。把要说的内容拆成若干句短台词一次交给它，她会一句一句地念出来（像 galgame 逐句播放）：' +
-          '`lines` 里每句一个 `{ ja, zh }`，`ja` 是要朗读的日语（纯日语），`zh` 是这句的中文（和正文对应）。' +
-          '每句都会被单独发声、句与句之间停顿约两秒。方便朗读时才用它 —— 只写中文不会发出声音。',
+          '对先輩说话。**只接受 `lines` 数组**（不要用顶层的 `ja` / `zh`，那是旧格式）：' +
+          '把要说的内容拆成若干句短台词，每句一个 `{ ja, zh, emotion }` —— `ja` 是要朗读的日语（纯日语），' +
+          '`zh` 是这句的中文（和正文对应），`emotion` 是这句的表情（**逐句给**，只换表情、不变嗓音）：' +
+          EMOTION_LABELS +
+          '。她会一句一句地念出来（像 galgame 逐句播放），句与句之间停顿约两秒。' +
+          '方便朗读时才用它 —— 只写中文不会发出声音。',
         parameters: {
           lines: {
             type: 'array',
-            required: true,
-            description: '这次要说的台词，按播放顺序排列；每句尽量短（≤ 30 字），最多 6 句',
+            description:
+              '这次要说的台词，按播放顺序排列；每句一个 `{ ja, zh, emotion }`，尽量短（≤ 30 字），最多 6 句',
             items: {
               type: 'object',
               additionalProperties: false,
@@ -229,14 +268,19 @@ export function apply(ctx) {
                   type: 'string',
                   required: true,
                   description: '这句的中文，和正文对应，作为桌宠字幕'
+                },
+                emotion: {
+                  type: 'string',
+                  enum: EMOTIONS,
+                  description: '这句的表情（逐句给）：' + EMOTION_LABELS
                 }
               }
             }
           },
           emotion: {
             type: 'string',
-            description:
-              '只影响桌宠的表情，不影响声音（模型只有一种音色），取值：happy / neutral / shy / thinking / excited'
+            enum: EMOTIONS,
+            description: '（可选）某句没写 emotion 时用它当默认：' + EMOTION_LABELS
           }
         },
         output: {
@@ -244,21 +288,30 @@ export function apply(ctx) {
           render: (_args, value) => [{ type: 'text', text: value }]
         },
         execute(args) {
-          const lines = (Array.isArray(args.lines) ? args.lines : [])
+          const rows = Array.isArray(args.lines) ? args.lines : []
+          if (rows.length === 0 && (args.ja || args.zh)) {
+            // The array is the only accepted shape. A conversation that predates
+            // it makes the model imitate `{ ja, zh }`, so ask again instead of
+            // quietly playing one long run-on line.
+            return (
+              '格式不对：`asumi_say` 只接受 `lines` 数组。请把要说的内容拆成若干短句，' +
+              '用 `lines` 重新调用一次，每句形如 `{ "ja": …, "zh": …, "emotion": … }`；' +
+              '不要使用顶层的 `ja` / `zh`。'
+            )
+          }
+          const fallback = EMOTIONS.includes(args.emotion) ? args.emotion : 'default'
+          const lines = rows
             .map((line) => ({
               ja: String((line && line.ja) || '').trim(),
-              zh: String((line && line.zh) || '').trim()
+              zh: String((line && line.zh) || '').trim(),
+              emotion: EMOTIONS.includes(line && line.emotion) ? line.emotion : fallback
             }))
             .filter((line) => line.ja !== '' || line.zh !== '')
           if (lines.length === 0) {
-            return '没有可说的内容：`lines` 至少要有 1 句。'
+            return '没有可说的内容：请用 `lines` 给出至少 1 句 `{ ja, zh, emotion }`。'
           }
 
-          const delivered = bridge.send({
-            type: 'say',
-            lines,
-            emotion: args.emotion ?? 'neutral'
-          })
+          const delivered = bridge.send({ type: 'say', lines })
           const said = lines.map((line) => line.zh).filter((zh) => zh !== '').join('')
           return delivered > 0
             ? `已对先輩说（${lines.length} 句）：${said}`
