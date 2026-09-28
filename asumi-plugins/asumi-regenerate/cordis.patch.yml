@@ -1,0 +1,10 @@
+# asumi-regenerate bundle layer
+#
+# Inserts the row that owns Asumi's regenerate action. The node half is empty by
+# design — it exists so the package becomes an enabled Loader entry, which is
+# what makes client-modules serve `exports["./client"]` to the browser. The
+# action itself lives in the Web client: it adds one button to the finalized
+# assistant message's action strip and re-sends that answer's question in place.
+- insert:
+    - id: asumi-regenerate
+      name: asumi-plugin-regenerate

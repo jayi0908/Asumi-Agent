@@ -40,7 +40,8 @@ const BUNDLES = [
   '@deepseek-ai/dsh-web-app',
   'asumi-plugin-persona',
   'asumi-plugin-desktop',
-  'asumi-plugin-fallback'
+  'asumi-plugin-fallback',
+  'asumi-plugin-regenerate'
 ]
 
 /**
@@ -75,7 +76,9 @@ const PLUGIN_PACKAGES = [
   { dir: 'asumi-persona', name: 'asumi-plugin-persona' },
   { dir: 'asumi-desktop', name: 'asumi-plugin-desktop' },
   // No host-package imports: it only uses the Cordis context.
-  { dir: 'asumi-fallback', name: 'asumi-plugin-fallback' }
+  { dir: 'asumi-fallback', name: 'asumi-plugin-fallback' },
+  // Pure UI: its node half is empty, its browser half ships via `./client`.
+  { dir: 'asumi-regenerate', name: 'asumi-plugin-regenerate' }
 ]
 
 function readJson(path) {
@@ -119,7 +122,7 @@ function sourceFingerprint(dshVersion) {
   hash.update(`${BUNDLES.join(',')}\n`)
   for (const plugin of PLUGIN_PACKAGES) {
     hash.update(`${plugin.name}\n`)
-    for (const file of ['package.json', 'cordis.patch.yml', 'index.js', 'persona.md']) {
+    for (const file of ['package.json', 'cordis.patch.yml', 'index.js', 'client.js', 'persona.md']) {
       const path = join(root, 'asumi-plugins', plugin.dir, file)
       if (!existsSync(path)) continue
       hash.update(`${file}:`)
