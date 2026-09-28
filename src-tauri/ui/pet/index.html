@@ -62,15 +62,6 @@
         transform: translateY(0);
       }
 
-      /* 右上角探头: she leans down from above the corner. */
-      body[data-presence="ghost"][data-appearance="peek-top"] .stage {
-        transform: translateY(-100%);
-      }
-
-      body[data-presence="ghost"][data-appearance="peek-top"].asumi-active .stage {
-        transform: translateY(0);
-      }
-
       body[data-presence="hidden"] .stage {
         opacity: 0;
       }
@@ -130,6 +121,25 @@
         display: block;
       }
 
+      /* ── 形态：SD 贴纸 / 游戏立绘（只露上半身）─────────────────────────
+         立绘的拼接在脚本里做（canvas 按 pos 叠身体与表情），这里只负责显示：
+         源图已经裁到上半，再让它盖满窗口。 */
+      body[data-form="sd"] .tachie {
+        display: none;
+      }
+
+      body[data-form="tachie"] .asumi {
+        display: none;
+      }
+
+      /* 立绘直接画进 canvas（不导出图片），所以跨源加载的图层也不会因
+         canvas 被污染而出错；画面已在脚本里按「盖满窗口、只取上半」算好。 */
+      .tachie {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
       .asumi {
         width: 100%;
         max-height: 340px;
@@ -166,14 +176,16 @@
       }
     </style>
   </head>
-  <body data-state="neutral" data-presence="always" data-appearance="fade">
+  <body data-state="neutral" data-presence="always" data-appearance="fade" data-form="sd">
     <div class="stage">
       <div class="caption" id="caption"><div class="lines" id="lines"></div></div>
+      <canvas class="tachie" id="tachie"></canvas>
       <img class="asumi" id="asumi" src="./asumi.png" alt="Asumi" />
     </div>
     <script>
       const caption = document.getElementById('caption')
       const linesEl = document.getElementById('lines')
+      const tachie = document.getElementById('tachie')
 
       // 说完之后还留多久（壳侧的「开口，停留后收回」）。
       const DWELL_MS = 4000
@@ -203,9 +215,38 @@
         document.body.dataset.appearance = appearance
       }
 
+      // 表情 → 差分 id（立绘换脸）与 SD 贴纸的姿势桶（沿用原有 CSS 的那几个）。
+      const EMOTIONS = {
+        default: { face: '0004', pose: 'neutral' },
+        doubt: { face: '0002', pose: 'thinking' },
+        serious: { face: '0003', pose: 'thinking' },
+        helpless: { face: '0005', pose: 'shy' },
+        confident: { face: '0006', pose: 'happy' },
+        reproach: { face: '0007', pose: 'thinking' },
+        surprised: { face: '0008', pose: 'excited' },
+        glad: { face: '0013', pose: 'happy' },
+        pout: { face: '0017', pose: 'shy' },
+        sad: { face: '0018', pose: 'shy' },
+        sigh: { face: '0028', pose: 'thinking' },
+        relieved: { face: '0031', pose: 'happy' },
+        angry: { face: '0033', pose: 'excited' },
+        agitated: { face: '0036', pose: 'excited' },
+        stunned: { face: '0040', pose: 'excited' },
+        grin: { face: '0041', pose: 'happy' },
+        embarrassed: { face: '0046', pose: 'shy' },
+        cry: { face: '0047', pose: 'shy' },
+        disgust: { face: '0050', pose: 'thinking' },
+        excited: { face: '0051', pose: 'excited' }
+      }
+
+      let emotion = 'default'
+
       // 壳侧切换情绪时调用。
       window.__asumiSetState = (state) => {
-        document.body.dataset.state = state || 'neutral'
+        emotion = state && EMOTIONS[state] ? state : 'default'
+        document.body.dataset.state = EMOTIONS[emotion].pose
+        // 只换表情，身体保持不变。
+        if (form === 'tachie') refreshSprite(false)
       }
 
       function scheduleHide(ms) {
@@ -313,11 +354,162 @@
         linesEl.replaceChildren()
       }
 
+      // ── 形态与立绘 ─────────────────────────────────────────────────────
+      let form = 'sd'
+      let sprite = null
+      let currentBody = null
+      let composeBusy = false
+      let composeAgain = false
+      let composeRepick = false
+
+      window.__asumiSetForm = (next) => {
+        form = next === 'tachie' ? 'tachie' : 'sd'
+        if (form === 'sd') {
+          document.body.dataset.form = 'sd'
+          return
+        }
+        refreshSprite(true)
+      }
+
+      window.__asumiSetSpriteConfig = (config) => {
+        sprite = config || null
+        if (form === 'tachie') refreshSprite(true)
+      }
+
+      // 壳侧在每次开口前调用：随机模式下换一具身体。
+      window.__asumiRefreshSprite = () => {
+        if (form === 'tachie') refreshSprite(true)
+      }
+
+      // 设置里的「测试立绘」：换一张，并露一次（无视存在方式）。
+      window.__asumiPreviewSprite = () => {
+        if (form !== 'tachie') return
+        refreshSprite(true)
+        document.body.classList.add('asumi-active')
+        scheduleHide(DWELL_MS)
+      }
+
+      function pickBody(pack) {
+        if (sprite.mode === 'fixed') {
+          return pack.bodies.find((body) => body.id === sprite.body) || pack.bodies[0]
+        }
+        let pool = pack.bodies
+        if (sprite.mode === 'subset') {
+          const chosen = new Set(sprite.bodies || [])
+          const subset = pack.bodies.filter((body) => chosen.has(body.id))
+          if (subset.length > 0) pool = subset
+        }
+        return pool[Math.floor(Math.random() * pool.length)]
+      }
+
+      function pickFace(pack, body) {
+        const wanted = body.group + (EMOTIONS[emotion] ? EMOTIONS[emotion].face : '0004')
+        return (
+          pack.faces.find((face) => face.id === wanted) ||
+          pack.faces.find((face) => face.id === body.group + '0004') ||
+          pack.faces.find((face) => face.group === body.group) ||
+          null
+        )
+      }
+
+      function layerUrl(name) {
+        const root = String((sprite.catalog && sprite.catalog.root) || '').replace(/\/+$/, '')
+        return window.asumi.convertFileSrc(root + '/' + sprite.pack + '/' + name + '.png')
+      }
+
+      function loadImage(url) {
+        return new Promise((resolve, reject) => {
+          const image = new Image()
+          image.onload = () => resolve(image)
+          image.onerror = reject
+          image.src = url
+        })
+      }
+
+      // 把身体与表情按 pos 叠好，再按「盖满窗口、只取上半身」画进 canvas。
+      // 图层来自 asset://（与应用不同源），所以只绘制、不导出像素。
+      async function drawBust(canvas, pack, body, face) {
+        const rects = face ? [body, face] : [body]
+        const minX = Math.min(...rects.map((rect) => rect.x))
+        const minY = Math.min(...rects.map((rect) => rect.y))
+        const maxX = Math.max(...rects.map((rect) => rect.x + rect.w))
+        const maxY = Math.max(...rects.map((rect) => rect.y + rect.h))
+        const full = document.createElement('canvas')
+        full.width = Math.max(1, maxX - minX)
+        full.height = Math.max(1, maxY - minY)
+        const fullContext = full.getContext('2d')
+        const bodyImage = await loadImage(layerUrl(body.id))
+        fullContext.drawImage(bodyImage, body.x - minX, body.y - minY, body.w, body.h)
+        if (face) {
+          const faceImage = await loadImage(layerUrl(face.id))
+          fullContext.drawImage(faceImage, face.x - minX, face.y - minY, face.w, face.h)
+        }
+
+        const ratio = window.devicePixelRatio || 1
+        const width = canvas.clientWidth || 360
+        const height = canvas.clientHeight || 420
+        canvas.width = Math.max(1, Math.round(width * ratio))
+        canvas.height = Math.max(1, Math.round(height * ratio))
+        const context = canvas.getContext('2d')
+        context.clearRect(0, 0, canvas.width, canvas.height)
+        context.imageSmoothingQuality = 'high'
+
+        const cropHeight = Math.max(1, Math.round(full.height / 2))
+        const scale = Math.max(canvas.width / full.width, canvas.height / cropHeight)
+        const drawWidth = full.width * scale
+        const drawHeight = cropHeight * scale
+        context.drawImage(
+          full,
+          0,
+          0,
+          full.width,
+          cropHeight,
+          (canvas.width - drawWidth) / 2,
+          0,
+          drawWidth,
+          drawHeight
+        )
+      }
+
+      // repick = true 换一具身体（每次开口 / 切换设置）；false 只换表情。
+      function refreshSprite(repick) {
+        const pack =
+          sprite && sprite.catalog && sprite.catalog.packs && sprite.catalog.packs[sprite.pack]
+        if (!pack || !pack.bodies || pack.bodies.length === 0) {
+          // No usable art: wear the sticker rather than stand there invisible.
+          document.body.dataset.form = 'sd'
+          return
+        }
+        document.body.dataset.form = 'tachie'
+        if (composeBusy) {
+          // 合成中：记下最新意图，画完再补一次。
+          composeAgain = true
+          composeRepick = composeRepick || repick
+          return
+        }
+        if (repick || !currentBody) currentBody = pickBody(pack)
+        if (!currentBody) return
+        composeBusy = true
+        drawBust(tachie, pack, currentBody, pickFace(pack, currentBody))
+          .catch(() => {})
+          .finally(() => {
+            composeBusy = false
+            if (composeAgain) {
+              composeAgain = false
+              const again = composeRepick
+              composeRepick = false
+              refreshSprite(again)
+            }
+          })
+      }
+
       // 采纳壳侧在本脚本之前注入的状态。放在最后很重要：上面是赋值，不是
       // 会被提升的函数声明。
       const init = window.__ASUMI_INIT || {}
       window.__asumiSetPresence(init.presence || presence)
       window.__asumiSetAppearance(init.appearance || appearance)
+      window.__asumiSetSpriteConfig(init.sprite || null)
+      window.__asumiSetForm((init.sprite && init.sprite.form) || 'sd')
     </script>
   </body>
 </html>

@@ -37,3 +37,10 @@ src-tauri/.cache
 *.sw?
 
 .claude/
+
+# The game's copyrighted sprite layers are kept locally: the sprite form reads
+# them from `spriteRoot`, they are never part of this repository.
+assets/fa/
+assets/no/
+assets/z1/
+assets/z2/

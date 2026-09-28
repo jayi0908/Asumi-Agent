@@ -63,7 +63,7 @@ const SILENT_DWELL: Duration = Duration::from_millis(1800);
 /// so the pause between lines is usually just the gap. Synthesis and playback
 /// never overlap on the model itself — it serializes its own inference — so the
 /// prefetch is pipelining, not concurrency.
-pub fn say(app: &AppHandle, lines: &[(String, String)]) {
+pub fn say(app: &AppHandle, lines: &[(String, String, String)]) {
     if lines.is_empty() {
         return;
     }
@@ -76,7 +76,7 @@ pub fn say(app: &AppHandle, lines: &[(String, String)]) {
 
     let voiced: Vec<bool> = lines
         .iter()
-        .map(|(ja, _)| wants_voice(system, ja))
+        .map(|(ja, _, _)| wants_voice(system, ja))
         .collect();
     let service_ready = if system || !voiced.iter().any(|voiced| *voiced) {
         true
@@ -93,8 +93,14 @@ pub fn say(app: &AppHandle, lines: &[(String, String)]) {
         return;
     }
 
+    // The sprite form picks a body per appearance; do it before the first line
+    // so the whole utterance wears the same one.
+    if shell.pet_form == "tachie" {
+        pet::refresh_sprite(app);
+    }
+
     let mut prefetched: Option<Receiver<Result<Vec<u8>, String>>> = None;
-    for (index, (ja, zh)) in lines.iter().enumerate() {
+    for (index, (ja, zh, emotion)) in lines.iter().enumerate() {
         if !is_current(generation) {
             return;
         }
@@ -111,12 +117,14 @@ pub fn say(app: &AppHandle, lines: &[(String, String)]) {
         };
 
         // Start the next line now; it synthesizes during this line's playback.
-        if let Some((next_ja, _)) = lines.get(index + 1) {
+        if let Some((next_ja, _, _)) = lines.get(index + 1) {
             if !system && service_ready && wants_voice(system, next_ja) {
                 prefetched = Some(synthesize_later(generation, &shell, next_ja));
             }
         }
 
+        // The line's expression rides with it, so the face changes line by line.
+        pet::set_emotion(app, emotion);
         pet::say_pair(app, zh, ja);
         if !ja.trim().is_empty() {
             eprintln!("[asumi] tts: line {} \"{}\"", index + 1, preview(ja));

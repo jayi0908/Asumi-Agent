@@ -149,6 +149,57 @@
         font-size: 11.5px;
       }
 
+      .bodies {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 6px;
+        max-height: 260px;
+        overflow-y: auto;
+      }
+
+      .body-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 7px;
+        cursor: pointer;
+      }
+
+      .body-row:hover {
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+      }
+
+      .body-row input {
+        accent-color: var(--accent);
+      }
+
+      .body-row .thumb {
+        width: 40px;
+        height: 52px;
+        object-fit: contain;
+        object-position: top center;
+        flex: none;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--text) 6%, transparent);
+      }
+
+      .body-row .name {
+        font-size: 12px;
+      }
+
+      button.test {
+        min-width: 190px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+
       footer {
         padding: 0 22px 20px;
         color: var(--muted);
@@ -180,6 +231,29 @@
         <h2>出现方式</h2>
         <p>她平时在不在屏幕上，以及说完话之后是否收回。</p>
         <div class="options" id="presence"></div>
+      </section>
+
+      <section>
+        <h2>桌宠形态</h2>
+        <p>SD 贴纸，或游戏立绘（只露上半身）。两种形态共用「出现模组」。</p>
+        <div class="options" id="petForm"></div>
+
+        <div id="tachieFields">
+          <div class="field">
+            <span>立绘素材目录</span>
+            <input id="spriteRoot" type="text" placeholder="留空 = 仓库的 assets/" />
+          </div>
+          <p class="note">分辨率包（列表缩略图取自 fa 半身包，它本身不出现在这里）</p>
+          <div class="options" id="spritePack"></div>
+          <p class="note">加载方式</p>
+          <div class="options" id="spriteMode"></div>
+          <p class="note">身体（a 配 a、b 配 b，不会交叉）</p>
+          <div class="bodies" id="spriteBodies"></div>
+          <div class="field">
+            <span>　</span>
+            <button id="testSprite" type="button" class="test">测试立绘</button>
+          </div>
+        </div>
       </section>
 
       <section>
@@ -241,8 +315,7 @@
 
       const APPEARANCE_HINTS = {
         fade: '原地淡入淡出。',
-        'peek-bottom': '从屏幕右下角探头，说完收回。',
-        'peek-top': '从屏幕右上角探头，说完收回。'
+        'peek-bottom': '从屏幕右下角探头，说完收回。'
       }
 
       const PRESENCE_HINTS = {
@@ -253,8 +326,7 @@
 
       const APPEARANCE_NAMES = {
         fade: '淡入淡出',
-        'peek-bottom': '右下角探头',
-        'peek-top': '右上角探头'
+        'peek-bottom': '右下角探头'
       }
 
       const VOICE_BACKEND_NAMES = {
@@ -273,8 +345,44 @@
         hidden: '隐藏'
       }
 
+      const PET_FORM_NAMES = {
+        sd: 'SD 贴纸',
+        tachie: '游戏立绘'
+      }
+
+      const PET_FORM_HINTS = {
+        sd: '当前这张 Q 版贴纸。',
+        tachie: '按 pos 拼接的游戏立绘，只露上半身。'
+      }
+
+      const SPRITE_PACK_NAMES = {
+        no: 'no · 原始',
+        z1: 'z1 · 1.7×',
+        z2: 'z2 · 2.5×'
+      }
+
+      const SPRITE_PACK_HINTS = {
+        no: '最小，原尺寸。',
+        z1: '放大 1.7 倍。',
+        z2: '放大 2.5 倍，最大最清晰。'
+      }
+
+      const SPRITE_MODE_NAMES = {
+        fixed: '固定一具',
+        subset: '从勾选的里随机',
+        all: '全部随机'
+      }
+
+      const SPRITE_MODE_HINTS = {
+        fixed: '每次开口都用你选的那具。',
+        subset: '每次开口从你勾选的那几具里随机。',
+        all: '每次开口从全部身体里随机。'
+      }
+
       let state = null
       let options = null
+      let catalog = null
+      const drawn = new Set()
       const status = document.getElementById('status')
 
       function radioGroup(container, values, current, names, hints, onPick) {
@@ -350,6 +458,30 @@
           (value) => update({ presence: value })
         )
         radioGroup(
+          document.getElementById('petForm'),
+          options.petForms,
+          state.petForm,
+          PET_FORM_NAMES,
+          PET_FORM_HINTS,
+          (value) => update({ petForm: value })
+        )
+        radioGroup(
+          document.getElementById('spritePack'),
+          options.spritePacks,
+          state.spritePack,
+          SPRITE_PACK_NAMES,
+          SPRITE_PACK_HINTS,
+          (value) => update({ spritePack: value })
+        )
+        radioGroup(
+          document.getElementById('spriteMode'),
+          options.spriteModes,
+          state.spriteMode,
+          SPRITE_MODE_NAMES,
+          SPRITE_MODE_HINTS,
+          (value) => update({ spriteMode: value })
+        )
+        radioGroup(
           document.getElementById('interaction'),
           ['true', 'false'],
           String(state.clickThrough),
@@ -385,12 +517,17 @@
         setValue('ttsUrl', state.ttsUrl)
         setValue('ttsPython', state.ttsPython)
         setValue('ttsLength', state.ttsLength)
+        setValue('spriteRoot', state.spriteRoot)
 
         // Manual start: the shell only connects, so where the repository lives
         // and which interpreter would launch it are not part of the setup.
         const manual = !state.ttsLazyStart
         document.getElementById('ttsRepoField').style.display = manual ? 'none' : ''
         document.getElementById('ttsPythonField').style.display = manual ? 'none' : ''
+
+        document.getElementById('tachieFields').style.display =
+          state.petForm === 'tachie' ? '' : 'none'
+        renderBodies()
 
         fillVoices(document.getElementById('voice'), state.voice)
         fillVoices(document.getElementById('voiceJa'), state.voiceJa)
@@ -405,12 +542,161 @@
         element.value = value ?? ''
       }
 
+      /** The preview pack: `fa` is the bust crop, small enough for a list row. */
+      function previewPack() {
+        if (!catalog || !catalog.packs) return null
+        const names = Object.keys(catalog.packs)
+        return catalog.packs.fa || catalog.packs[names[0]] || null
+      }
+
+      function layerUrl(packName, name) {
+        const root = String(catalog.root || '').replace(/\/+$/, '')
+        return window.asumi.convertFileSrc(root + '/' + packName + '/' + name + '.png')
+      }
+
+      function loadArt(url) {
+        return new Promise((resolve, reject) => {
+          const image = new Image()
+          image.onload = () => resolve(image)
+          image.onerror = reject
+          image.src = url
+        })
+      }
+
+      /**
+       * Composite one body with the default face into a thumbnail canvas.
+       * Drawn, never exported: the layers come from the asset protocol, so
+       * reading them back would be a cross-origin canvas read.
+       */
+      async function drawThumb(canvas, bodyId) {
+        const pack = previewPack()
+        if (!pack) return
+        const packName = catalog.packs.fa ? 'fa' : Object.keys(catalog.packs)[0]
+        const body = pack.bodies.find((item) => item.id === bodyId)
+        if (!body) return
+        const face =
+          pack.faces.find((item) => item.id === body.group + (catalog.defaultFace || '0004')) ||
+          pack.faces.find((item) => item.group === body.group)
+        const minX = Math.min(body.x, face ? face.x : body.x)
+        const minY = Math.min(body.y, face ? face.y : body.y)
+        const maxX = Math.max(body.x + body.w, face ? face.x + face.w : 0)
+        const maxY = Math.max(body.y + body.h, face ? face.y + face.h : 0)
+        const full = document.createElement('canvas')
+        full.width = Math.max(1, maxX - minX)
+        full.height = Math.max(1, maxY - minY)
+        const fullContext = full.getContext('2d')
+        fullContext.drawImage(
+          await loadArt(layerUrl(packName, body.id)),
+          body.x - minX,
+          body.y - minY,
+          body.w,
+          body.h
+        )
+        if (face) {
+          fullContext.drawImage(
+            await loadArt(layerUrl(packName, face.id)),
+            face.x - minX,
+            face.y - minY,
+            face.w,
+            face.h
+          )
+        }
+        const ratio = window.devicePixelRatio || 1
+        canvas.width = Math.round(40 * ratio)
+        canvas.height = Math.round(52 * ratio)
+        const context = canvas.getContext('2d')
+        context.clearRect(0, 0, canvas.width, canvas.height)
+        const scale = Math.min(canvas.width / full.width, canvas.height / full.height)
+        const drawWidth = full.width * scale
+        const drawHeight = full.height * scale
+        context.drawImage(
+          full,
+          (canvas.width - drawWidth) / 2,
+          (canvas.height - drawHeight) / 2,
+          drawWidth,
+          drawHeight
+        )
+      }
+
+      /** The body list, with a control per the current load mode. */
+      function renderBodies() {
+        const container = document.getElementById('spriteBodies')
+        if (!container) return
+        const pack =
+          catalog && catalog.packs && (catalog.packs[state.spritePack] || previewPack())
+        const bodies = pack && pack.bodies ? pack.bodies : []
+        container.replaceChildren()
+        if (bodies.length === 0) {
+          const note = document.createElement('p')
+          note.className = 'note'
+          note.textContent =
+            '没找到立绘素材：把「立绘素材目录」指向放着 no/z1/z2/fa 的目录（留空用仓库的 assets/）。'
+          container.append(note)
+          return
+        }
+        for (const body of bodies) {
+          const row = document.createElement('label')
+          row.className = 'body-row'
+
+          const input = document.createElement('input')
+          if (state.spriteMode === 'fixed') {
+            input.type = 'radio'
+            input.name = 'spriteBody'
+            input.checked = state.spriteBody === body.id
+            input.addEventListener('change', () => {
+              if (input.checked) update({ spriteBody: body.id })
+            })
+          } else if (state.spriteMode === 'subset') {
+            input.type = 'checkbox'
+            input.checked = (state.spriteBodies || []).includes(body.id)
+            input.addEventListener('change', () => {
+              const chosen = new Set(state.spriteBodies || [])
+              if (input.checked) chosen.add(body.id)
+              else chosen.delete(body.id)
+              update({ spriteBodies: Array.from(chosen) })
+            })
+          } else {
+            input.type = 'checkbox'
+            input.checked = true
+            input.disabled = true
+          }
+
+          const thumb = document.createElement('canvas')
+          thumb.className = 'thumb'
+          if (!drawn.has(body.id)) {
+            drawn.add(body.id)
+            drawThumb(thumb, body.id).catch(() => {
+              drawn.delete(body.id)
+            })
+          }
+
+          const name = document.createElement('span')
+          name.className = 'name'
+          name.textContent = body.id
+
+          row.append(input, thumb, name)
+          container.append(row)
+        }
+      }
+
+      function refreshCatalog() {
+        return invoke('sprite_catalog')
+          .then((result) => {
+            catalog = result
+            drawn.clear()
+            renderBodies()
+          })
+          .catch(() => {})
+      }
+
       function update(patch) {
         state = { ...state, ...patch }
         invoke('save_shell_settings', { settings: state }).then((result) => {
           state = result.settings
           // Re-render the fields the shell may have normalized.
           render()
+          // A moved sprite root changes what the catalog can see.
+          refreshCatalog()
           status.textContent = '已保存'
           status.className = 'saved'
           clearTimeout(update.timer)
@@ -442,10 +728,19 @@
         update({ ttsLength: Number.isFinite(value) ? value : 1.0 })
       })
 
+      document.getElementById('spriteRoot').addEventListener('change', (event) => {
+        update({ spriteRoot: event.target.value.trim() })
+      })
+
+      document.getElementById('testSprite').addEventListener('click', () => {
+        invoke('test_pet_sprite')
+      })
+
       invoke('shell_settings').then((result) => {
         state = result.settings
         options = result.options
         render()
+        refreshCatalog()
       })
     </script>
   </body>

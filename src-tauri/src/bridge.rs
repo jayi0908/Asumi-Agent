@@ -99,9 +99,10 @@ fn handle(app: &AppHandle, message: &Value) {
                 return;
             }
             // One worker owns the whole utterance: it plays the lines in order,
-            // times each caption to its voice, and prefetches the next line's
-            // synthesis while the current one plays. The bridge reader stays
-            // free, and synthesis may block while the model loads.
+            // sets each line's expression, times each caption to its voice, and
+            // prefetches the next line's synthesis while the current one plays.
+            // The bridge reader stays free, and synthesis may block while the
+            // model loads.
             let handle = app.clone();
             std::thread::spawn(move || tts::say(&handle, &lines));
         }
@@ -143,31 +144,45 @@ fn handle(app: &AppHandle, message: &Value) {
     }
 }
 
-/// The bilingual lines of a `say`: the `lines` array, or a bare `ja`/`zh` pair.
+/// The bilingual lines of a `say`, each with its own expression.
 ///
-/// Each line is one spoken sentence — the model splits its reply so the voice
-/// and the caption line up the way galgame dialogue does.
-fn parse_lines(message: &Value) -> Vec<(String, String)> {
+/// A line is one spoken sentence — the model splits its reply so the voice and
+/// the caption line up the way galgame dialogue does — and carries the face it
+/// should be delivered with, so the expression changes line by line.
+fn parse_lines(message: &Value) -> Vec<(String, String, String)> {
+    let fallback = message
+        .get("emotion")
+        .and_then(|value| value.as_str())
+        .unwrap_or("default")
+        .to_string();
+
     if let Some(items) = message.get("lines").and_then(|value| value.as_array()) {
         let mut lines = Vec::new();
         for item in items {
             let ja = item.get("ja").and_then(|value| value.as_str()).unwrap_or("").trim();
             let zh = item.get("zh").and_then(|value| value.as_str()).unwrap_or("").trim();
-            if !ja.is_empty() || !zh.is_empty() {
-                lines.push((ja.to_string(), zh.to_string()));
+            if ja.is_empty() && zh.is_empty() {
+                continue;
             }
+            let emotion = item
+                .get("emotion")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| fallback.clone());
+            lines.push((ja.to_string(), zh.to_string(), emotion));
         }
         if !lines.is_empty() {
             return lines;
         }
     }
 
+    // Older `{ ja, zh }` frames predate the line array and the per-line mood.
     let ja = message.get("ja").and_then(|value| value.as_str()).unwrap_or("").trim();
     let zh = message.get("zh").and_then(|value| value.as_str()).unwrap_or("").trim();
     if ja.is_empty() && zh.is_empty() {
         Vec::new()
     } else {
-        vec![(ja.to_string(), zh.to_string())]
+        vec![(ja.to_string(), zh.to_string(), fallback)]
     }
 }
 

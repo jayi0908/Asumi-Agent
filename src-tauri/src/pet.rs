@@ -5,7 +5,7 @@
 //!
 //! * **presence** (`always` / `ghost` / `hidden`) decides whether she is on
 //!   screen at all, and whether she leaves between utterances;
-//! * **appearance** (`fade` / `peek-bottom` / `peek-top`) decides how she
+//! * **appearance** (`fade` / `peek-bottom`) decides how she
 //!   arrives and leaves, and which corner she lives in.
 //!
 //! The shell owns the window's position and visibility; the page owns the
@@ -47,12 +47,15 @@ pub fn ensure(app: &AppHandle) {
 
     let current = settings::get();
     // Hand the page its initial state before it renders, so no setter can race
-    // the page's own scripts.
+    // the page's own scripts. `convertFileSrc` lets the sprite form load the
+    // layered art the shell allowed into the asset scope.
     let init = format!(
-        "window.__ASUMI_INIT = {};",
+        "window.asumi = {{ convertFileSrc: (path) => window.__TAURI_INTERNALS__.convertFileSrc(path) }};\n\
+         window.__ASUMI_INIT = {};",
         serde_json::json!({
             "presence": current.presence,
             "appearance": current.appearance,
+            "sprite": sprite_config(),
         })
     );
 
@@ -100,13 +103,54 @@ fn park(app: &AppHandle) {
     let margin = MARGIN * scale;
 
     let x = area.position.x as f64 + area.size.width as f64 - width - margin;
-    let y = if settings::get().appearance == "peek-top" {
-        area.position.y as f64 + margin
-    } else {
-        area.position.y as f64 + area.size.height as f64 - height - margin
-    };
+    let y = area.position.y as f64 + area.size.height as f64 - height - margin;
 
     let _ = window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
+}
+
+/// The sprite settings plus the layer catalog the page composites from.
+fn sprite_config() -> serde_json::Value {
+    let current = settings::get();
+    serde_json::json!({
+        "form": current.pet_form,
+        "pack": current.sprite_pack,
+        "mode": current.sprite_mode,
+        "body": current.sprite_body,
+        "bodies": current.sprite_bodies,
+        "catalog": crate::sprite::catalog(),
+    })
+}
+
+/// Tell the pet which form to wear (SD sticker or layered sprite).
+pub fn apply_form(app: &AppHandle, form: &str) {
+    eval(
+        app,
+        &format!("window.__asumiSetForm && window.__asumiSetForm({})", literal(form)),
+    );
+}
+
+/// Push the sprite settings and catalog to the pet.
+pub fn apply_sprite(app: &AppHandle) {
+    let config = sprite_config();
+    eval(
+        app,
+        &format!(
+            "window.__asumiSetSpriteConfig && window.__asumiSetSpriteConfig({})",
+            config
+        ),
+    );
+}
+
+/// Load a sprite now and show it, whatever the presence mode is — the settings
+/// window's test button, so a chosen body can be seen without waiting for a line.
+pub fn preview_sprite(app: &AppHandle) {
+    eval(app, "window.__asumiPreviewSprite && window.__asumiPreviewSprite()");
+}
+
+/// Let the sprite form pick a body for this appearance. Random modes change
+/// body per utterance, so the shell calls this just before she speaks.
+pub fn refresh_sprite(app: &AppHandle) {
+    eval(app, "window.__asumiRefreshSprite && window.__asumiRefreshSprite()");
 }
 
 /// Call a JS hook on the pet page, ignoring an absent window.
@@ -195,6 +239,21 @@ pub fn apply_click_through(app: &AppHandle, enabled: bool) {
 /// Update the pet's mood.
 pub fn set_state(app: &AppHandle, state: &str) {
     reveal(app);
+    eval(
+        app,
+        &format!(
+            "window.__asumiSetState && window.__asumiSetState({})",
+            literal(state)
+        ),
+    );
+}
+
+/// Set the pet's mood without revealing her.
+///
+/// A spoken reply carries its emotion on the same frame as its lines, and the
+/// pet should already wear it when the first line brings her on screen — the
+/// mood itself must not be what reveals her.
+pub fn set_emotion(app: &AppHandle, state: &str) {
     eval(
         app,
         &format!(

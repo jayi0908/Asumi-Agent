@@ -17,6 +17,7 @@ pub mod pet;
 pub mod prefs;
 pub mod quick;
 pub mod settings;
+pub mod sprite;
 pub mod tray;
 pub mod tts;
 pub mod voice;
@@ -44,13 +45,19 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             prefs::shell_settings,
-            prefs::save_shell_settings
+            prefs::save_shell_settings,
+            prefs::sprite_catalog,
+            prefs::test_pet_sprite
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             // Settings first: the pet and the tray are both built from them.
             settings::load(&handle);
+
+            // Let the webviews read the layered sprite art, where the user
+            // keeps it, before the pet page asks for any of it.
+            sprite::allow(&handle);
 
             // Show the main window immediately; it holds a "starting the
             // engine" page until DSH announces its URL, then navigates.

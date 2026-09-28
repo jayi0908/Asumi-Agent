@@ -15,8 +15,9 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-/// How Asumi enters and leaves the screen.
-pub const APPEARANCES: [&str; 3] = ["fade", "peek-bottom", "peek-top"];
+/// How Asumi enters and leaves the screen. There is no top-right peek: the
+/// sprite form is anchored to the bottom-right corner.
+pub const APPEARANCES: [&str; 2] = ["fade", "peek-bottom"];
 
 /// Whether and how long Asumi stays on screen.
 pub const PRESENCES: [&str; 3] = ["always", "ghost", "hidden"];
@@ -24,13 +25,23 @@ pub const PRESENCES: [&str; 3] = ["always", "ghost", "hidden"];
 /// Which engine voices Asumi.
 pub const VOICE_BACKENDS: [&str; 2] = ["asumi", "system"];
 
+/// What the pet is wearing: the chibi sticker, or the layered game sprite.
+pub const PET_FORMS: [&str; 2] = ["sd", "tachie"];
+
+/// Resolution packs the sprite form can load. `fa` is the bust crop and is not
+/// selectable — the settings list only borrows it for thumbnails.
+pub const SPRITE_PACKS: [&str; 3] = ["no", "z1", "z2"];
+
+/// How a sprite body is chosen for each appearance.
+pub const SPRITE_MODES: [&str; 3] = ["fixed", "subset", "all"];
+
 const FILE: &str = "shell-settings.json";
 
 /// Persisted shell settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ShellSettings {
-    /// Appearance module: `fade` | `peek-bottom` | `peek-top`.
+    /// Appearance module: `fade` | `peek-bottom`.
     pub appearance: String,
     /// Presence mode: `always` | `ghost` | `hidden`.
     pub presence: String,
@@ -57,6 +68,19 @@ pub struct ShellSettings {
     pub tts_python: String,
     /// Speech rate: the service's `length`, where >1 is slower.
     pub tts_length: f64,
+    /// Which form the pet wears: `sd` (the chibi sticker) or `tachie` (the
+    /// layered game sprite).
+    pub pet_form: String,
+    /// Where the layered sprite art lives. Empty means `<repo>/assets`.
+    pub sprite_root: String,
+    /// Resolution pack to load for the sprite form: `no` | `z1` | `z2` | `fa`.
+    pub sprite_pack: String,
+    /// How a body is chosen for each appearance: `fixed` | `subset` | `all`.
+    pub sprite_mode: String,
+    /// The one body loaded in `fixed` mode.
+    pub sprite_body: String,
+    /// The bodies eligible in `subset` mode.
+    pub sprite_bodies: Vec<String>,
 }
 
 impl Default for ShellSettings {
@@ -75,6 +99,12 @@ impl Default for ShellSettings {
             tts_lazy_start: true,
             tts_python: "python3".to_string(),
             tts_length: 1.0,
+            pet_form: "sd".to_string(),
+            sprite_root: String::new(),
+            sprite_pack: "z1".to_string(),
+            sprite_mode: "all".to_string(),
+            sprite_body: String::new(),
+            sprite_bodies: Vec::new(),
         }
     }
 }
@@ -91,6 +121,15 @@ impl ShellSettings {
         }
         if !VOICE_BACKENDS.contains(&self.voice_backend.as_str()) {
             self.voice_backend = ShellSettings::default().voice_backend;
+        }
+        if !PET_FORMS.contains(&self.pet_form.as_str()) {
+            self.pet_form = ShellSettings::default().pet_form;
+        }
+        if !SPRITE_PACKS.contains(&self.sprite_pack.as_str()) {
+            self.sprite_pack = ShellSettings::default().sprite_pack;
+        }
+        if !SPRITE_MODES.contains(&self.sprite_mode.as_str()) {
+            self.sprite_mode = ShellSettings::default().sprite_mode;
         }
         // A rate outside this range is a hand-edit mistake; clamp rather than
         // let it reach the model.

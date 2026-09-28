@@ -57,7 +57,6 @@ fn presence_label(mode: &str) -> &'static str {
 fn appearance_label(module: &str) -> &'static str {
     match module {
         "peek-bottom" => "右下角探头",
-        "peek-top" => "右上角探头",
         _ => "淡入淡出",
     }
 }
